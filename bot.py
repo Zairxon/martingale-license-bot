@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 # Конфигурация бота
 TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = int(os.getenv('ADMIN_ID', '0'))
+ADMIN_ID = 295608267
 DB_FILE = 'licenses.db'
 
 # Цена полной лицензии в долларах
