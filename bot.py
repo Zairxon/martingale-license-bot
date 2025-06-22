@@ -1,1023 +1,1578 @@
-import logging
-import sqlite3
-import asyncio
-import uuid
-import datetime
-import hashlib
-import base64
-import os
-from typing import Optional
-from dataclasses import dataclass
-import io
+//+------------------------------------------------------------------+
+//|                       MartingaleVPS_Enhanced_LICENSED.mq5      |
+//|                            VPS Optimized Version + LICENSE     |
+//|                       Защищенная лицензионная версия           |
+//+------------------------------------------------------------------+
+#property copyright "TradingBot 2025 - VPS Enhanced + LICENSE PROTECTION"
+#property version   "1.61"
+#property description "VPS Optimized Auto Martingale Robot - LICENSED VERSION"
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+#include <Trade\Trade.mqh>
+#include <Trade\PositionInfo.mqh>
+#include <Trade\OrderInfo.mqh>
 
-# Конфигурация
-BOT_TOKEN = "7946468786:AAGGeUgN6liN462JMcTG31aWCRKk4n7BB1M"
-ADMIN_ID = 295698267  # @Zair_Khudayberganov
-LICENSE_PRICE = 100  # Цена лицензии в USD
-TRIAL_DAYS = 3  # Дни испытательного периода
-FULL_LICENSE_DAYS = 30  # Дни полной лицензии
+//--- Trading objects
+CTrade trade;
+CPositionInfo position;
+COrderInfo order;
 
-# Банковские реквизиты
-BANK_DETAILS = """
-💳 **РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ:**
+//+------------------------------------------------------------------+
+//| СИСТЕМА ЛИЦЕНЗИРОВАНИЯ - НЕ УДАЛЯТЬ!                           |
+//+------------------------------------------------------------------+
+input group "=== 🔐 ЛИЦЕНЗИЯ ==="
+input string LicenseKey = "";                   // Лицензионный ключ (обязательно!)
 
-🏦 **Банк:** Kapital Bank Uzbekistan
-🔢 **МФО:** 01158
-💰 **Счет:** 22618 840 092855351 001
-💳 **Номер карты:** 4278 3200 2190 9386
+//--- Лицензионные переменные
+bool licenseValid = false;
+datetime lastLicenseCheck = 0;
+datetime licenseCheckInterval = 24 * 60 * 60;   // Проверка каждые 24 часа
+string botURL = "https://martingale-license-bot-production.up.railway.app"; // URL вашего бота
+bool tradingBlocked = true;                     // Блокировка торговли по умолчанию
 
-💵 **Сумма:** $100 USD
-⏰ **Срок действия:** 30 дней
+//--- Input parameters (ОРИГИНАЛЬНЫЕ НАСТРОЙКИ)
+input group "=== ОСНОВНЫЕ ПАРАМЕТРЫ ==="
+input double InitialLot = 0.01;              // Начальный размер лота
+input int TakeProfitPips = 10000;            // Take Profit в пунктах
+input int BuyStopPips = 3000;                // Расстояние Buy Stop в пунктах
 
-📋 **Инструкция:**
-1. Переведите $100 на указанные реквизиты
-2. Сделайте скриншот чека об оплате
-3. Отправьте скриншот в этот бот
-4. Ожидайте подтверждения (обычно в течение 24 часов)
-5. Получите полную лицензию на 30 дней
-"""
+input group "=== УПРАВЛЕНИЕ РИСКАМИ ==="
+input int MaxDoubling = 15;                  // Максимальное количество удвоений
+input double MaxLotSize = 50.0;              // Максимальный размер лота
 
-# Описание советника
-EA_DESCRIPTION = """
-🤖 **MartingaleVPS Enhanced v1.60**
+input group "=== VPS ОПТИМИЗАЦИЯ ==="
+input int MaxRetries = 3;                    // Макс попыток для неудачных операций
+input int RetryDelay = 500;                  // Задержка между попытками (мс)
+input int MinTicksForStart = 1;              // Мин тиков перед запуском
+input bool WaitForMarketOpen = false;        // Ждать открытия рынка - ОТКЛЮЧЕНО
+input int MarketCheckInterval = 1;           // Интервал проверки рынка (сек)
 
-**Описание:**
-Профессиональный торговый советник для автоматической торговли по стратегии Мартингейл, специально оптимизированный для работы на VPS серверах с криптовалютами и драгоценными металлами.
+input group "=== НАСТРОЙКИ АВТО ТРЕНДА ==="
+input int TrendPeriod = 20;                  // Период для определения тренда
+input double TrendThreshold = 50.0;          // Порог тренда в пунктах
+input bool UseMA = true;                     // Использовать скользящую среднюю
+input int DelayBetweenSessions = 5;          // Задержка между сессиями (секунды)
 
-**Поддерживаемые символы:**
-• 🟡 **BTCUSD** - Bitcoin (основной)
-• 🥇 **XAUUSD** - Золото (дополнительный)
+input group "=== НАСТРОЙКИ СЕССИИ ==="
+input bool ResetAfterTP = true;              // Сброс после Take Profit
+input int MagicNumber = 123456;              // Магический номер
+input string CommentPrefix = "VPS_Mart";     // Префикс комментария
 
-❌ **Внимание:** Работает ТОЛЬКО с указанными символами!
+//--- Рабочие переменные (ОРИГИНАЛЬНЫЕ)
+bool WorkingUseMA = true;
+double currentLot = 0.01;
+int doublingCount = 0;
+bool sessionActive = false;
+bool robotStarted = false;
+bool marketReady = false;
+double sessionStartPrice = 0;
+datetime lastTradeTime = 0;
+datetime lastSessionEnd = 0;
+datetime lastMarketCheck = 0;
+double pipValue = 0;
+string tradingSymbol = "";
+int tickCounter = 0;
+int startupDelay = 1;
+datetime robotStartTime = 0;
 
-**Основные возможности:**
-• ✅ VPS-оптимизированная архитектура
-• ✅ Автоматическое определение тренда
-• ✅ Интеллектуальное управление рисками
-• ✅ Защита от пропущенных сделок
-• ✅ Система удвоения лотов (мартингейл)
-• ✅ Глобальный Take Profit
-• ✅ Аварийная остановка при достижении лимитов
+//--- Уровни сессии (ОРИГИНАЛЬНЫЕ)
+double sessionSellLevel = 0;
+double sessionBuyLevel = 0;
+double sessionTP = 0;
+double sessionSL = 0;
 
-**Торговые параметры:**
+//--- Определение тренда (ОРИГИНАЛЬНЫЕ)
+int maHandle = INVALID_HANDLE;
 
-📊 **Для XAUUSD (золото):**
-• Take Profit: 10,000 пунктов
-• Stop Distance: 3,000 пунктов  
-• Настройки по умолчанию (не изменять)
+//--- Мониторинг VPS соединения (ОРИГИНАЛЬНЫЕ)
+datetime lastTickTime = 0;
+int connectionErrors = 0;
 
-📊 **Для BTCUSD (биткоин):**
-• Take Profit: 100,000 пунктов
-• Stop Distance: 30,000 пунктов
-• Обязательно настроить правильно!
+//--- Отслеживание позиций (ОРИГИНАЛЬНЫЕ)
+struct PositionData {
+    ulong ticket;
+    int type;
+    double lots;
+    double openPrice;
+    double takeProfit;
+    double stopLoss;
+    datetime openTime;
+};
 
-**Управление лотами:**
+PositionData positions[];
 
-💰 **Баланс $100-999:**
-• Рекомендуется: 0.01 лот
-• Максимум: 0.10 лот (риск высокий)
-
-💰 **Баланс $1000+:**
-• Рекомендуется: 0.10 лот  
-• Максимум: 1.00 лот (риск очень высокий)
-
-**Безопасность:**
-• 🔒 Проверка лицензии каждые 10 минут
-• 🔒 Привязка к конкретному торговому счету
-• 🔒 Защита от копирования и повторного использования
-• 🔒 Автоматическая остановка при истечении лицензии
-
-**Рекомендуемые настройки:**
-• Таймфрейм: M1-M15
-• Минимальный депозит: $100
-• Рекомендуемый депозит: $1000+
-• VPS сервер для круглосуточной работы
-
-**Что включено:**
-• Техническая поддержка 24/7
-• Обновления включены в лицензию
-• Детальные инструкции по установке
-• Настройка для каждого символа
-"""
-
-@dataclass
-class User:
-    user_id: int
-    username: str
-    license_key: Optional[str]
-    license_expiry: Optional[datetime.datetime]
-    license_type: str  # 'trial' или 'full'
-    payment_pending: bool
-    account_number: Optional[str]  # Привязанный торговый счет
-    trial_used: bool  # Использовался ли пробный период
-    downloads_count: int  # Количество скачиваний
-    created_at: datetime.datetime
-
-class DatabaseManager:
-    def __init__(self, db_path: str = "licenses.db"):
-        self.db_path = db_path
-        self.init_database()
+//+------------------------------------------------------------------+
+//| 🔐 ПРОВЕРКА ЛИЦЕНЗИИ - КРИТИЧЕСКАЯ ФУНКЦИЯ                    |
+//+------------------------------------------------------------------+
+bool CheckLicense() {
+    Print("🔐 === ПРОВЕРКА ЛИЦЕНЗИИ ===");
     
-    def init_database(self):
-        """Инициализация базы данных"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Таблица пользователей
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                license_key TEXT UNIQUE,
-                license_expiry TIMESTAMP,
-                license_type TEXT DEFAULT 'trial',
-                payment_pending BOOLEAN DEFAULT FALSE,
-                account_number TEXT,
-                trial_used BOOLEAN DEFAULT FALSE,
-                downloads_count INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Таблица платежей
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS payments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                license_key TEXT,
-                amount REAL,
-                status TEXT DEFAULT 'pending',
-                screenshot_file_id TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                confirmed_at TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-            )
-        """)
-        
-        # Таблица скачиваний
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS downloads (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                download_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                ip_hash TEXT,
-                FOREIGN KEY (user_id) REFERENCES users (user_id)
-            )
-        """)
-        
-        # Таблица для хранения файла EA
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS ea_files (
-                id INTEGER PRIMARY KEY,
-                filename TEXT,
-                file_data BLOB,
-                version TEXT,
-                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Таблица лицензионных проверок
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS license_checks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                license_key TEXT,
-                account_number TEXT,
-                check_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                status TEXT,
-                ip_hash TEXT
-            )
-        """)
-        
-        conn.commit()
-        conn.close()
+    // Проверяем что ключ введен
+    if(StringLen(LicenseKey) == 0) {
+        Alert("❌ ОШИБКА: Лицензионный ключ не введен!");
+        Print("❌ КРИТИЧЕСКАЯ ОШИБКА: Пустой лицензионный ключ!");
+        Print("❌ Введите лицензионный ключ в настройках советника!");
+        return false;
+    }
     
-    def get_user(self, user_id: int) -> Optional[User]:
-        """Получить пользователя по ID"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            return User(
-                user_id=row[0],
-                username=row[1],
-                license_key=row[2],
-                license_expiry=datetime.datetime.fromisoformat(row[3]) if row[3] else None,
-                license_type=row[4] or 'trial',
-                payment_pending=bool(row[5]),
-                account_number=row[6],
-                trial_used=bool(row[7]),
-                downloads_count=row[8] or 0,
-                created_at=datetime.datetime.fromisoformat(row[9])
-            )
-        return None
+    Print("🔐 Лицензионный ключ: ", StringSubstr(LicenseKey, 0, 8), "...");
+    Print("🔐 Проверяем лицензию на сервере...");
     
-    def create_user(self, user_id: int, username: str) -> User:
-        """Создать нового пользователя"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO users (user_id, username, created_at)
-            VALUES (?, ?, ?)
-        """, (user_id, username, datetime.datetime.now().isoformat()))
-        
-        conn.commit()
-        conn.close()
-        
-        return self.get_user(user_id)
+    // Формируем URL для проверки
+    string checkURL = botURL + "/check_license?key=" + LicenseKey;
+    Print("🔐 URL проверки: ", checkURL);
     
-    def generate_license_key(self, license_type: str = 'trial') -> str:
-        """Генерация уникального ключа лицензии"""
-        prefix = "TRIAL" if license_type == 'trial' else "FULL"
-        return f"MEA-{prefix}-{uuid.uuid4().hex[:8].upper()}-{uuid.uuid4().hex[:8].upper()}"
+    // Выполняем HTTP запрос
+    string headers = "";
+    char post[], result[];
+    int timeout = 5000; // 5 секунд
     
-    def create_trial_license(self, user_id: int):
-        """Создать пробную лицензию"""
-        if self.is_trial_used(user_id):
-            return False, "Пробный период уже использован"
-        
-        license_key = self.generate_license_key('trial')
-        expiry_date = datetime.datetime.now() + datetime.timedelta(days=TRIAL_DAYS)
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            UPDATE users SET 
-                license_key = ?, 
-                license_expiry = ?, 
-                license_type = 'trial',
-                trial_used = TRUE
-            WHERE user_id = ?
-        """, (license_key, expiry_date.isoformat(), user_id))
-        
-        conn.commit()
-        conn.close()
-        
-        return True, license_key
+    Print("🔐 Отправляем запрос на сервер...");
+    int httpResult = WebRequest("GET", checkURL, headers, timeout, post, result, headers);
     
-    def is_trial_used(self, user_id: int) -> bool:
-        """Проверить, использовался ли пробный период"""
-        user = self.get_user(user_id)
-        return user.trial_used if user else False
-    
-    def create_payment_request(self, user_id: int, screenshot_file_id: str):
-        """Создать запрос на оплату"""
-        license_key = self.generate_license_key('full')
+    if(httpResult == -1) {
+        int error = GetLastError();
+        Print("❌ ОШИБКА HTTP запроса: ", error);
         
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Обновляем пользователя
-        cursor.execute("""
-            UPDATE users SET payment_pending = TRUE WHERE user_id = ?
-        """, (user_id,))
-        
-        # Создаем запись о платеже
-        cursor.execute("""
-            INSERT INTO payments (user_id, license_key, amount, screenshot_file_id)
-            VALUES (?, ?, ?, ?)
-        """, (user_id, license_key, LICENSE_PRICE, screenshot_file_id))
-        
-        conn.commit()
-        conn.close()
-        
-        return license_key
-    
-    def confirm_payment(self, user_id: int, license_key: str):
-        """Подтвердить платеж и активировать полную лицензию"""
-        expiry_date = datetime.datetime.now() + datetime.timedelta(days=FULL_LICENSE_DAYS)
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Обновляем пользователя
-        cursor.execute("""
-            UPDATE users SET 
-                license_key = ?, 
-                license_expiry = ?, 
-                license_type = 'full',
-                payment_pending = FALSE 
-            WHERE user_id = ?
-        """, (license_key, expiry_date.isoformat(), user_id))
-        
-        # Обновляем платеж
-        cursor.execute("""
-            UPDATE payments SET 
-                status = 'confirmed', 
-                confirmed_at = ? 
-            WHERE user_id = ? AND license_key = ?
-        """, (datetime.datetime.now().isoformat(), user_id, license_key))
-        
-        conn.commit()
-        conn.close()
-    
-    def increment_download_count(self, user_id: int):
-        """Увеличить счетчик скачиваний"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            UPDATE users SET downloads_count = downloads_count + 1 WHERE user_id = ?
-        """, (user_id,))
-        
-        cursor.execute("""
-            INSERT INTO downloads (user_id) VALUES (?)
-        """, (user_id,))
-        
-        conn.commit()
-        conn.close()
-    
-    def get_pending_payments(self):
-        """Получить все ожидающие платежи"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT p.*, u.username FROM payments p
-            JOIN users u ON p.user_id = u.user_id
-            WHERE p.status = 'pending'
-            ORDER BY p.created_at DESC
-        """)
-        
-        rows = cursor.fetchall()
-        conn.close()
-        return rows
-    
-    def get_stats(self):
-        """Получить статистику"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM users")
-        total_users = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM users WHERE trial_used = TRUE")
-        trial_users = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM users WHERE license_type = 'full' AND license_expiry > ?", 
-                      (datetime.datetime.now().isoformat(),))
-        active_full_licenses = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT SUM(downloads_count) FROM users")
-        total_downloads = cursor.fetchone()[0] or 0
-        
-        cursor.execute("SELECT COUNT(*) FROM payments WHERE status = 'confirmed'")
-        confirmed_payments = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        return {
-            'total_users': total_users,
-            'trial_users': trial_users,
-            'active_licenses': active_full_licenses,
-            'total_downloads': total_downloads,
-            'confirmed_payments': confirmed_payments
+        if(error == 4060) {
+            Alert("❌ ОШИБКА: URL не разрешен! Добавьте в настройки:\n" + botURL);
+            Print("❌ Добавьте в MT5: Сервис -> Настройки -> Советники -> Разрешить WebRequest для URL:");
+            Print("❌ ", botURL);
         }
-
-# Инициализация
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-db = DatabaseManager()
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start"""
-    user = update.effective_user
-    db_user = db.get_user(user.id)
-    
-    if not db_user:
-        db_user = db.create_user(user.id, user.username or user.first_name)
-    
-    # Проверяем статус лицензии
-    has_active_license = False
-    if db_user.license_key and db_user.license_expiry:
-        has_active_license = db_user.license_expiry > datetime.datetime.now()
-    
-    # Формируем клавиатуру в зависимости от статуса
-    keyboard = []
-    
-    if not db_user.trial_used:
-        keyboard.append([InlineKeyboardButton("🆓 Получить 3 дня БЕСПЛАТНО", callback_data="get_trial")])
-    
-    if not has_active_license:
-        keyboard.append([InlineKeyboardButton("💰 Купить полную лицензию ($100)", callback_data="buy_license")])
-    
-    keyboard.extend([
-        [InlineKeyboardButton("📊 Мой статус", callback_data="check_status")],
-        [InlineKeyboardButton("📖 Описание советника", callback_data="show_description")],
-        [InlineKeyboardButton("❓ Инструкция", callback_data="show_instructions")]
-    ])
-    
-    if has_active_license:
-        keyboard.append([InlineKeyboardButton("⬇️ Скачать EA файл", callback_data="download_ea")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    welcome_text = f"""
-🤖 **Добро пожаловать в MartingaleEA License Bot!**
-
-Привет, {user.first_name}! 👋
-
-Этот бот предназначен для лицензирования торгового советника **MartingaleVPS Enhanced v1.60**.
-
-🎁 **СПЕЦИАЛЬНОЕ ПРЕДЛОЖЕНИЕ:**
-• 3 дня БЕСПЛАТНОГО использования
-• Полная функциональность
-• Без ограничений
-
-💼 **Полная лицензия:**
-• 30 дней использования
-• Техническая поддержка 24/7
-• Обновления и улучшения
-• Стоимость: $100 USD
-
-Выберите действие:
-"""
-    
-    await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка нажатий кнопок"""
-    query = update.callback_query
-    await query.answer()
-    
-    user_id = query.from_user.id
-    data = query.data
-    
-    if data == "get_trial":
-        await handle_get_trial(query)
-    elif data == "buy_license":
-        await handle_buy_license(query)
-    elif data == "check_status":
-        await handle_check_status(query)
-    elif data == "show_description":
-        await handle_show_description(query)
-    elif data == "show_instructions":
-        await handle_show_instructions(query)
-    elif data == "download_ea":
-        await handle_download_ea(query)
-    elif data == "back_to_menu":
-        await start_from_callback(query)
-    elif data.startswith("confirm_payment_"):
-        payment_info = data.replace("confirm_payment_", "")
-        await handle_confirm_payment(query, payment_info)
-    elif data.startswith("reject_payment_"):
-        payment_info = data.replace("reject_payment_", "")
-        await handle_reject_payment(query, payment_info)
-
-async def handle_get_trial(query):
-    """Получение пробной лицензии"""
-    user_id = query.from_user.id
-    
-    success, result = db.create_trial_license(user_id)
-    
-    if not success:
-        await query.edit_message_text(
-            f"❌ **{result}**\n\n"
-            f"Каждый пользователь может получить пробный период только один раз.\n"
-            f"Для дальнейшего использования приобретите полную лицензию.",
-            parse_mode='Markdown'
-        )
-        return
-    
-    license_key = result
-    keyboard = [
-        [InlineKeyboardButton("⬇️ Скачать EA файл", callback_data="download_ea")],
-        [InlineKeyboardButton("📖 Инструкция по установке", callback_data="show_instructions")],
-        [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    trial_text = f"""
-🎉 **ПРОБНАЯ ЛИЦЕНЗИЯ АКТИВИРОВАНА!**
-
-✅ **Ваш пробный ключ:** `{license_key}`
-⏰ **Действует:** 3 дня (72 часа)
-🎯 **Тип:** Полная функциональность
-
-**📋 Что дальше:**
-1. Скачайте EA файл (кнопка ниже)
-2. Прочитайте инструкцию по установке
-3. Установите в MetaTrader 5
-4. Введите ключ: `{license_key}`
-5. Начинайте торговать!
-
-**⚠️ Важно:**
-• Лицензия привязывается к торговому счету
-• Один ключ = один счет
-• После истечения нужно купить полную лицензию
-
-💰 **Полная лицензия: $100 за 30 дней**
-"""
-    
-    await query.edit_message_text(trial_text, reply_markup=reply_markup, parse_mode='Markdown')
-
-async def handle_buy_license(query):
-    """Обработка покупки лицензии"""
-    user_id = query.from_user.id
-    user = db.get_user(user_id)
-    
-    # Проверяем, есть ли уже активная полная лицензия
-    if user.license_type == 'full' and user.license_expiry:
-        if user.license_expiry > datetime.datetime.now():
-            await query.edit_message_text(
-                f"✅ **У вас уже есть активная полная лицензия!**\n\n"
-                f"🔑 **Ключ:** `{user.license_key}`\n"
-                f"⏰ **Действует до:** {user.license_expiry.strftime('%d.%m.%Y %H:%M')}\n\n"
-                f"Для продления обратитесь в поддержку после истечения.",
-                parse_mode='Markdown'
-            )
-            return
-    
-    # Проверяем, есть ли ожидающий платеж
-    if user.payment_pending:
-        await query.edit_message_text(
-            "⏳ **У вас есть ожидающий платеж!**\n\n"
-            "Пожалуйста, дождитесь подтверждения или отправьте новый скриншот об оплате."
-        )
-        return
-    
-    # Показываем реквизиты для оплаты
-    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(
-        BANK_DETAILS + "\n\n**После оплаты отправьте скриншот чека в этот чат!**",
-        reply_markup=reply_markup,
-        parse_mode='Markdown'
-    )
-
-async def handle_check_status(query):
-    """Проверка статуса лицензии"""
-    user_id = query.from_user.id
-    user = db.get_user(user_id)
-    
-    if not user.license_key:
-        status_text = """
-❌ **Лицензия не найдена**
-
-Вы еще не получили лицензию.
-
-**Доступные опции:**
-• 🆓 Получить 3 дня бесплатно
-• 💰 Купить полную лицензию ($100)
-"""
-    elif user.license_expiry and user.license_expiry > datetime.datetime.now():
-        days_left = (user.license_expiry - datetime.datetime.now()).days
-        hours_left = (user.license_expiry - datetime.datetime.now()).seconds // 3600
         
-        license_emoji = "🆓" if user.license_type == 'trial' else "💎"
-        license_name = "Пробная" if user.license_type == 'trial' else "Полная"
+        return false;
+    }
+    
+    string response = CharArrayToString(result);
+    Print("🔐 Ответ сервера (", httpResult, "): ", response);
+    
+    // Проверяем HTTP статус
+    if(httpResult != 200) {
+        Print("❌ Ошибка сервера. HTTP код: ", httpResult);
+        Alert("❌ ОШИБКА: Сервер лицензий недоступен (код " + IntegerToString(httpResult) + ")");
+        return false;
+    }
+    
+    // Простая проверка ответа
+    if(StringFind(response, "\"valid\":true") >= 0 || StringFind(response, "active") >= 0) {
+        Print("✅ ЛИЦЕНЗИЯ ДЕЙСТВИТЕЛЬНА!");
+        lastLicenseCheck = TimeCurrent();
+        return true;
+    } else if(StringFind(response, "expired") >= 0) {
+        Alert("❌ ЛИЦЕНЗИЯ ИСТЕКЛА! Обновите лицензию в боте.");
+        Print("❌ Лицензия истекла");
+        return false;
+    } else if(StringFind(response, "invalid") >= 0) {
+        Alert("❌ НЕВЕРНЫЙ ЛИЦЕНЗИОННЫЙ КЛЮЧ!");
+        Print("❌ Неверный ключ");
+        return false;
+    } else {
+        Print("❌ Неизвестный ответ сервера: ", response);
+        Alert("❌ ОШИБКА: Неожиданный ответ сервера лицензий");
+        return false;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| 🔐 ПЕРИОДИЧЕСКАЯ ПРОВЕРКА ЛИЦЕНЗИИ                             |
+//+------------------------------------------------------------------+
+void CheckLicensePeriodically() {
+    // Проверяем раз в 24 часа
+    if(TimeCurrent() - lastLicenseCheck > licenseCheckInterval) {
+        Print("🔐 Время периодической проверки лицензии...");
         
-        status_text = f"""
-✅ **Лицензия активна!**
-
-{license_emoji} **Тип:** {license_name}
-🔑 **Ключ:** `{user.license_key}`
-⏰ **Действует до:** {user.license_expiry.strftime('%d.%m.%Y %H:%M')}
-📅 **Осталось:** {days_left} дн. {hours_left} ч.
-📊 **Скачиваний:** {user.downloads_count}
-"""
-    else:
-        license_name = "Пробная" if user.license_type == 'trial' else "Полная"
-        status_text = f"""
-❌ **Лицензия истекла**
-
-🔑 **Ключ:** `{user.license_key}`
-📝 **Тип:** {license_name}
-⏰ **Истекла:** {user.license_expiry.strftime('%d.%m.%Y %H:%M')}
-
-Для продления приобретите новую лицензию.
-"""
-    
-    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(status_text, reply_markup=reply_markup, parse_mode='Markdown')
-
-async def handle_show_description(query):
-    """Показать описание советника"""
-    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(EA_DESCRIPTION, reply_markup=reply_markup, parse_mode='Markdown')
-
-async def handle_show_instructions(query):
-    """Показать инструкцию по установке"""
-    instructions = """
-📖 **ИНСТРУКЦИЯ ПО УСТАНОВКЕ И НАСТРОЙКЕ**
-
-**1. СИСТЕМНЫЕ ТРЕБОВАНИЯ:**
-• MetaTrader 5 (последняя версия)
-• Стабильное интернет-соединение
-• Разрешенная автоторговля
-• Минимальный депозит: $100
-
-**2. УСТАНОВКА EA:**
-• Скачайте файл EA из бота
-• Скопируйте в папку: `MetaTrader 5/MQL5/Experts/`
-• Перезапустите MetaTrader 5
-• EA появится в навигаторе
-
-**3. ПОДДЕРЖИВАЕМЫЕ СИМВОЛЫ:**
-🟢 **BTCUSD** - основной символ
-🟢 **XAUUSD** - золото (дополнительный)
-
-❌ **Другие символы не поддерживаются!**
-
-**4. НАСТРОЙКИ ПО СИМВОЛАМ:**
-
-📊 **Для XAUUSD:**
-• TakeProfitPips: `10000` (не изменять)
-• BuyStopPips: `3000` (не изменять)
-• Используйте настройки по умолчанию
-
-📊 **Для BTCUSD:**
-• TakeProfitPips: `100000` (добавлен ноль)
-• BuyStopPips: `30000` (добавлен ноль)
-• Обязательно измените эти параметры!
-
-**5. УПРАВЛЕНИЕ ЛОТАМИ:**
-
-💰 **Баланс $100-999:**
-• ✅ Рекомендуется: `0.01` лот
-• ⚠️ Рискованно: `0.10` лот
-• ❌ Не рекомендуется: больше 0.10
-
-💰 **Баланс $1000+:**
-• ✅ Рекомендуется: `0.10` лот
-• ⚠️ Рискованно: `1.00` лот
-• ❌ Крайне рискованно: больше 1.00
-
-**6. АКТИВАЦИЯ ЛИЦЕНЗИИ:**
-• Перетащите EA на график
-• В поле "LicenseKey" введите ваш ключ
-• Установите правильные настройки для символа
-• Разрешите автоторговлю (галочка)
-• Нажмите OK
-
-**7. ПРОВЕРКА РАБОТЫ:**
-• В журнале должно появиться: "✅ Лицензия активна"
-• Статус: "ТОРГУЕТ" в правом углу графика
-• Появятся уровни сессии на графике
-
-**⚠️ КРИТИЧЕСКИ ВАЖНО:**
-
-🔒 **Лицензирование:**
-• Один ключ = один торговый счет MT5
-• При смене счета ключ блокируется
-• Проверка лицензии каждые 10 минут онлайн
-
-📈 **Риск-менеджмент:**
-• НЕ используйте весь депозит сразу
-• Начинайте с минимальных лотов
-• Следите за просадкой (не более 30%)
-• При серии убытков - остановите советника
-
-🔧 **Технические требования:**
-• VPS рекомендуется для 24/7 работы
-• Пинг к брокеру не более 50ms
-• Стабильное интернет-соединение
-
-**8. ПОИСК И УСТРАНЕНИЕ НЕИСПРАВНОСТЕЙ:**
-
-❌ **"Неверная лицензия":**
-• Проверьте правильность ключа
-• Убедитесь в наличии интернета
-• Перезапустите EA
-
-❌ **"Символ не поддерживается":**
-• Используйте только BTCUSD или XAUUSD
-• Проверьте точное написание символа
-
-❌ **"Нет сигнала":**
-• Дождитесь формирования тренда
-• Проверьте рыночное время
-• Убедитесь в наличии ликвидности
-
-**🆘 ТЕХНИЧЕСКАЯ ПОДДЕРЖКА:**
-• Telegram: @Zair_Khudayberganov
-• Время ответа: до 24 часов
-• Приложите: скриншот настроек + ваш ключ
-• Опишите проблему детально
-
-**💡 СОВЕТЫ ДЛЯ УСПЕШНОЙ ТОРГОВЛИ:**
-• Торгуйте в активные сессии (Лондон, Нью-Йорк)
-• Избегайте торговли во время новостей
-• Регулярно проверяйте работу советника
-• Ведите учет результатов
-"""
-    
-    keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await query.edit_message_text(instructions, reply_markup=reply_markup, parse_mode='Markdown')
-
-async def handle_download_ea(query):
-    """Скачивание EA файла"""
-    user_id = query.from_user.id
-    user = db.get_user(user_id)
-    
-    # Проверяем наличие активной лицензии
-    if not user.license_key or not user.license_expiry:
-        await query.edit_message_text(
-            "❌ **Доступ запрещен**\n\n"
-            "Для скачивания нужна активная лицензия.\n"
-            "Получите пробную или купите полную лицензию."
-        )
-        return
-    
-    if user.license_expiry <= datetime.datetime.now():
-        await query.edit_message_text(
-            "❌ **Лицензия истекла**\n\n"
-            "Ваша лицензия истекла. Для скачивания обновите лицензию."
-        )
-        return
-    
-    # Заглушка для файла (в реальности здесь будет загрузка из БД)
-    await query.edit_message_text(
-        """
-⬇️ **СКАЧИВАНИЕ EA ФАЙЛА**
-
-📁 **Файл:** MartingaleVPS_Enhanced_v1.60.ex5
-📏 **Размер:** ~45 KB
-🔒 **Защищено лицензией**
-
-🔗 **Ссылка на скачивание:**
-`https://temp-download-link.com/ea-file-{}`
-
-⏰ **Ссылка действительна 10 минут**
-
-📋 **После скачивания:**
-1. Поместите файл в папку MetaTrader 5/MQL5/Experts/
-2. Перезапустите MetaTrader 5
-3. Установите на график и введите ключ: `{}`
-
-**⚠️ Внимание:** Каждое скачивание фиксируется в системе.
-""".format(user.license_key[:8], user.license_key),
-        parse_mode='Markdown'
-    )
-    
-    # Увеличиваем счетчик скачиваний
-    db.increment_download_count(user_id)
-    
-    # Здесь в реальности нужно отправить файл
-    # await query.message.reply_document(document=InputFile(ea_file_data, filename="MartingaleVPS_Enhanced_v1.60.ex5"))
-
-async def handle_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка скриншотов об оплате"""
-    user = update.effective_user
-    
-    if update.message.photo:
-        # Получаем файл с максимальным разрешением
-        photo = update.message.photo[-1]
-        file_id = photo.file_id
+        bool newStatus = CheckLicense();
         
-        # Создаем запрос на оплату
-        license_key = db.create_payment_request(user.id, file_id)
+        if(newStatus != licenseValid) {
+            licenseValid = newStatus;
+            tradingBlocked = !licenseValid;
+            
+            if(!licenseValid) {
+                Print("❌ ЛИЦЕНЗИЯ СТАЛА НЕДЕЙСТВИТЕЛЬНОЙ! БЛОКИРУЕМ ТОРГОВЛЮ!");
+                Comment("❌ СОВЕТНИК ЗАБЛОКИРОВАН\n" +
+                        "🔐 ПРИЧИНА: Недействительная лицензия\n" +
+                        "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+                        "🔑 КЛЮЧ: " + StringSubstr(LicenseKey, 0, 8) + "...\n" +
+                        "📞 Обратитесь к администратору!");
+                
+                // Закрываем все позиции
+                CloseAllPositionsAndOrders();
+            } else {
+                Print("✅ Лицензия снова действительна!");
+                Comment("✅ ЛИЦЕНЗИЯ ВОССТАНОВЛЕНА\n" +
+                        "📊 СТАТУС: Готов к торговле\n" +
+                        "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()));
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| 🔐 БЛОКИРОВКА ТОРГОВЛИ ПРИ НЕВЕРНОЙ ЛИЦЕНЗИИ                  |
+//+------------------------------------------------------------------+
+bool IsLicenseValid() {
+    if(tradingBlocked) {
+        static datetime lastWarning = 0;
         
-        # Уведомляем пользователя
-        await update.message.reply_text(
-            f"✅ **Скриншот получен!**\n\n"
-            f"🔄 **Статус:** Ожидает проверки\n"
-            f"🎫 **Номер заявки:** {license_key}\n\n"
-            f"⏰ Проверка обычно занимает до 24 часов.\n"
-            f"После подтверждения вы получите полную лицензию на 30 дней.",
-            parse_mode='Markdown'
-        )
+        // Показываем предупреждение раз в минуту
+        if(TimeCurrent() - lastWarning > 60) {
+            Print("🚫 ТОРГОВЛЯ ЗАБЛОКИРОВАНА: Недействительная лицензия");
+            lastWarning = TimeCurrent();
+            
+            Comment("🚫 ТОРГОВЛЯ ЗАБЛОКИРОВАНА\n" +
+                    "🔐 ПРИЧИНА: Неверная/истекшая лицензия\n" +
+                    "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+                    "🔑 КЛЮЧ: " + (StringLen(LicenseKey) > 0 ? StringSubstr(LicenseKey, 0, 8) + "..." : "НЕ УКАЗАН") + "\n" +
+                    "💡 РЕШЕНИЕ:\n" +
+                    "   1. Проверьте лицензионный ключ\n" +
+                    "   2. Обновите лицензию в Telegram боте\n" +
+                    "   3. Убедитесь что интернет работает\n" +
+                    "📞 Поддержка: @YourSupportBot");
+        }
         
-        # Уведомляем администратора
-        await notify_admin_about_payment(context, user, license_key, file_id)
+        return false;
+    }
     
-    else:
-        await update.message.reply_text(
-            "❌ Пожалуйста, отправьте изображение (скриншот) чека об оплате."
-        )
+    return true;
+}
 
-async def notify_admin_about_payment(context, user, license_key, file_id):
-    """Уведомление администратора о новом платеже"""
-    keyboard = [
-        [InlineKeyboardButton("✅ Подтвердить", callback_data=f"confirm_payment_{user.id}_{license_key}")],
-        [InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_payment_{user.id}_{license_key}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+//+------------------------------------------------------------------+
+//| Инициализация эксперта - МОДИФИЦИРОВАННАЯ                      |
+//+------------------------------------------------------------------+
+int OnInit() {
+    Print("🚀🚀🚀 НАЧАЛО ИНИЦИАЛИЗАЦИИ РОБОТА 🚀🚀🚀");
+    Print("📋 НАЗВАНИЕ СОВЕТНИКА: MartingaleVPS_Enhanced v1.61 [LICENSED]");
+    Print("📋 АВТОР: TradingBot 2025 - VPS Enhanced + LICENSE");
+    Print("📋 ОПИСАНИЕ: VPS Optimized Auto Martingale Robot - LICENSED VERSION");
     
-    admin_text = f"""
-🔔 **НОВЫЙ ПЛАТЕЖ!**
-
-👤 **Пользователь:** {user.first_name} (@{user.username or 'без username'})
-🆔 **ID:** `{user.id}`
-🎫 **Номер заявки:** `{license_key}`
-💰 **Сумма:** $100 USD
-⏰ **Время:** {datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
-
-Проверьте скриншот и подтвердите платеж:
-"""
+    //+------------------------------------------------------------------+
+    //| 🔐 ПЕРВООЧЕРЕДНАЯ ПРОВЕРКА ЛИЦЕНЗИИ                           |
+    //+------------------------------------------------------------------+
+    Print("🔐 === ЗАПУСК ПРОВЕРКИ ЛИЦЕНЗИИ ===");
     
-    try:
-        # Отправляем фото
-        await context.bot.send_photo(
-            chat_id=ADMIN_ID,
-            photo=file_id,
-            caption=admin_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-    except Exception as e:
-        logger.error(f"Ошибка отправки уведомления админу: {e}")
-
-async def handle_confirm_payment(query, payment_info):
-    """Подтверждение платежа администратором"""
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("❌ У вас нет прав на это действие!")
-        return
+    // Проверяем лицензию ДО всего остального
+    licenseValid = CheckLicense();
+    tradingBlocked = !licenseValid;
     
-    try:
-        # Парсим информацию о платеже
-        parts = payment_info.split('_')
-        user_id = int(parts[0])
-        license_key = '_'.join(parts[1:])
+    if(!licenseValid) {
+        Print("❌❌❌ КРИТИЧЕСКАЯ ОШИБКА: НЕДЕЙСТВИТЕЛЬНАЯ ЛИЦЕНЗИЯ! ❌❌❌");
         
-        # Подтверждаем платеж в базе данных
-        db.confirm_payment(user_id, license_key)
+        Comment("❌ СОВЕТНИК ЗАБЛОКИРОВАН\n" +
+                "🔐 ПРИЧИНА: Недействительная лицензия\n" +
+                "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+                "🔑 ВВЕДЕННЫЙ КЛЮЧ: " + (StringLen(LicenseKey) > 0 ? StringSubstr(LicenseKey, 0, 8) + "..." : "НЕ УКАЗАН") + "\n\n" +
+                "💡 КАК ИСПРАВИТЬ:\n" +
+                "   1. Получите лицензию в Telegram боте\n" +
+                "   2. Скопируйте лицензионный ключ\n" +
+                "   3. Вставьте ключ в настройки советника\n" +
+                "   4. Перезапустите советника\n\n" +
+                "📞 Поддержка: @YourSupportBot\n" +
+                "🌐 Бот: " + botURL);
         
-        # Уведомляем пользователя
-        user_text = f"""
-🎉 **ПЛАТЕЖ ПОДТВЕРЖДЕН!**
-
-✅ Ваша ПОЛНАЯ лицензия активирована!
-
-💎 **Ваш ключ:** `{license_key}`
-⏰ **Действует до:** {(datetime.datetime.now() + datetime.timedelta(days=30)).strftime('%d.%m.%Y %H:%M')}
-🎯 **Тип:** Полная лицензия (30 дней)
-
-**📋 Что дальше:**
-1. Скачайте обновленный EA файл
-2. Используйте новый ключ: `{license_key}`
-3. Полная техническая поддержка включена
-
-💼 Приятной и прибыльной торговли!
-"""
+        Alert("❌ ДОСТУП ЗАПРЕЩЕН!\n\nНеверная лицензия!\nПолучите лицензию в Telegram боте!");
         
-        keyboard = [
-            [InlineKeyboardButton("⬇️ Скачать EA файл", callback_data="download_ea")],
-            [InlineKeyboardButton("📖 Инструкция", callback_data="show_instructions")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        // СОВЕТНИК НЕ БУДЕТ ТОРГОВАТЬ, НО ОСТАНЕТСЯ ЗАПУЩЕННЫМ для показа предупреждений
+        Print("🔐 Советник запущен в режиме ТОЛЬКО ПРОСМОТР (торговля заблокирована)");
+    } else {
+        Print("✅✅✅ ЛИЦЕНЗИЯ ДЕЙСТВИТЕЛЬНА! ✅✅✅");
+        Print("🔐 Ключ: ", StringSubstr(LicenseKey, 0, 8), "...");
+        Print("🔐 Торговля РАЗРЕШЕНА!");
         
-        await query.bot.send_message(
-            chat_id=user_id,
-            text=user_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        Comment("✅ ЛИЦЕНЗИЯ ПОДТВЕРЖДЕНА\n" +
+                "📊 СТАТУС: Инициализация...\n" +
+                "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+                "🔑 КЛЮЧ: " + StringSubstr(LicenseKey, 0, 8) + "...\n" +
+                "🤖 РЕЖИМ: VPS Оптимизированный");
+    }
+    
+    //+------------------------------------------------------------------+
+    //| ОРИГИНАЛЬНАЯ ЛОГИКА ИНИЦИАЛИЗАЦИИ (БЕЗ ИЗМЕНЕНИЙ)            |
+    //+------------------------------------------------------------------+
+    
+    // Отображение на графике
+    tradingSymbol = Symbol();
+    robotStartTime = TimeCurrent();
+    
+    Print("=== VPS УЛУЧШЕННЫЙ МАРТИНГЕЙЛ РОБОТ ЗАПУЩЕН ===");
+    Print("🔧 Терминал подключен: ", (TerminalInfoInteger(TERMINAL_CONNECTED) ? "ДА" : "НЕТ"));
+    Print("🔧 Автоторговля разрешена: ", (TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ? "ДА" : "НЕТ"));
+    Print("🔧 Счет торговый: ", AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ? "ДА" : "НЕТ");
+    Print("🔧 Баланс: $", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2));
+    Print("🔧 Символ: ", tradingSymbol);
+    Print("🔧 Начальный лот: ", DoubleToString(InitialLot, 3));
+    Print("🔧 Дистанция стопов: ", BuyStopPips, " пунктов");
+    Print("🔧 Take Profit: ", TakeProfitPips, " пунктов");
+    
+    // Инициализация рабочих переменных
+    WorkingUseMA = UseMA;
+    
+    // Сброс VPS-специфичных переменных
+    marketReady = false;
+    tickCounter = 0;
+    connectionErrors = 0;
+    lastTickTime = TimeCurrent();
+    
+    // Настройка торговых объектов с VPS оптимизацией
+    trade.SetExpertMagicNumber(MagicNumber);
+    trade.SetMarginMode();
+    trade.SetTypeFillingBySymbol(tradingSymbol);
+    trade.SetDeviationInPoints(50);
+    
+    // Расчет стоимости пункта
+    CalculatePipValue();
+    
+    // Показать полную информацию о символе
+    ShowSymbolInfo();
+    
+    // Инициализация определения тренда с обработкой ошибок
+    if(WorkingUseMA) {
+        Print("📈 Создание MA индикатора...");
+        maHandle = iMA(tradingSymbol, PERIOD_CURRENT, TrendPeriod, 0, MODE_SMA, PRICE_CLOSE);
+        if(maHandle == INVALID_HANDLE) {
+            Print("❌ Ошибка создания MA индикатора - будет использован резервный метод");
+            WorkingUseMA = false;
+        } else {
+            Print("✅ MA индикатор создан успешно");
+        }
+    } else {
+        Print("📊 Используется анализ цен без MA индикатора");
+    }
+    
+    // Инициализация переменных
+    currentLot = InitialLot;
+    doublingCount = 0;
+    sessionActive = false;
+    robotStarted = false;
+    
+    Print("=== VPS НАСТРОЙКИ ===");
+    Print("Макс попыток: ", MaxRetries);
+    Print("Задержка повтора: ", RetryDelay, " мс");
+    Print("Мин тиков: ", MinTicksForStart);
+    Print("Задержка запуска: ", startupDelay, " секунд");
+    Print("Задержка сессии: ", DelayBetweenSessions, " секунд");
+    
+    // Проверка существующих позиций
+    CheckExistingPositions();
+    
+    // Запуск VPS-оптимизированной последовательности инициализации
+    if(!sessionActive && licenseValid) {
+        Print("🔄 VPS Инициализация: УСКОРЕННЫЙ РЕЖИМ!");
+        Print("🔄 Ожидание всего ", MinTicksForStart, " тик для запуска!");
+        Print("🔄 Максимальная задержка: ", startupDelay, " секунд");
+        Print("🔄 ПРИНУДИТЕЛЬНЫЙ ЗАПУСК через 5 секунд если не запустится!");
+        lastMarketCheck = TimeCurrent();
+    }
+    
+    Print("✅✅✅ СОВЕТНИК 'MartingaleVPS_Enhanced v1.61 [LICENSED]' УСПЕШНО ЗАПУЩЕН! ✅✅✅");
+    
+    if(licenseValid) {
+        Print("🤖 Робот готов к работе на VPS!");
         
-        # Обновляем сообщение админа
-        await query.edit_message_caption(
-            caption=f"✅ **ПЛАТЕЖ ПОДТВЕРЖДЕН**\n\n{query.message.caption}",
-            parse_mode='Markdown'
-        )
+        // Финальное уведомление на график
+        Comment("✅ СОВЕТНИК: MartingaleVPS_Enhanced v1.61\n" +
+                "📊 СТАТУС: ЗАПУЩЕН И ГОТОВ!\n" +
+                "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+                "💰 СИМВОЛ: " + tradingSymbol + "\n" +
+                "🔧 БАЛАНС: $" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + "\n" +
+                "🚀 VPS РЕЖИМ: АКТИВЕН\n" +
+                "🔐 ЛИЦЕНЗИЯ: ДЕЙСТВИТЕЛЬНА");
+    } else {
+        Print("🚫 Робот в режиме ПРОСМОТРА (торговля заблокирована)!");
+    }
+    
+    return(INIT_SUCCEEDED);
+}
+
+//+------------------------------------------------------------------+
+//| Деинициализация эксперта - МОДИФИЦИРОВАННАЯ                    |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason) {
+    if(maHandle != INVALID_HANDLE) {
+        IndicatorRelease(maHandle);
+    }
+    
+    Print("=== VPS РОБОТ ОСТАНОВЛЕН ===");
+    Print("Причина: ", reason);
+    Print("Всего ошибок соединения: ", connectionErrors);
+    Print("🔐 Последняя проверка лицензии: ", TimeToString(lastLicenseCheck));
+    
+    // Финальное сообщение на график
+    Comment("❌ СОВЕТНИК: MartingaleVPS_Enhanced v1.61\n" +
+            "📊 СТАТУС: ОСТАНОВЛЕН\n" +
+            "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+            "🛑 ПРИЧИНА: " + IntegerToString(reason) + "\n" +
+            "📊 ОШИБОК: " + IntegerToString(connectionErrors) + "\n" +
+            "🔐 ЛИЦЕНЗИЯ: " + (licenseValid ? "БЫЛА ДЕЙСТВИТЕЛЬНА" : "НЕДЕЙСТВИТЕЛЬНА"));
+}
+
+//+------------------------------------------------------------------+
+//| Функция тика эксперта - МОДИФИЦИРОВАННАЯ                       |
+//+------------------------------------------------------------------+
+void OnTick() {
+    //+------------------------------------------------------------------+
+    //| 🔐 ПЕРВАЯ ПРОВЕРКА: ЛИЦЕНЗИЯ                                  |
+    //+------------------------------------------------------------------+
+    
+    // Проверяем лицензию каждый тик (быстрая проверка локального статуса)
+    if(!IsLicenseValid()) {
+        return; // Блокируем весь OnTick если лицензия недействительна
+    }
+    
+    // Периодическая проверка лицензии на сервере
+    CheckLicensePeriodically();
+    
+    // Если лицензия стала недействительной - выходим
+    if(tradingBlocked) {
+        return;
+    }
+    
+    //+------------------------------------------------------------------+
+    //| ОРИГИНАЛЬНАЯ ЛОГИКА OnTick (БЕЗ ИЗМЕНЕНИЙ)                   |
+    //+------------------------------------------------------------------+
+    
+    // БАЗОВАЯ ДИАГНОСТИКА КАЖДОГО ТИКА
+    tickCounter++;
+    lastTickTime = TimeCurrent();
+    
+    // Каждые 10 тиков показываем статус
+    if(tickCounter % 10 == 0 || tickCounter <= 5) {
+        Print("📊 ТИК #", tickCounter, " | Время: ", TimeToString(TimeCurrent()), " | Сессия: ", (sessionActive ? "АКТИВНА" : "НЕТ"));
+    }
+    
+    // ПРИНУДИТЕЛЬНЫЙ ЗАПУСК ЧЕРЕЗ 5 СЕКУНД!
+    int secondsFromStart = (int)(TimeCurrent() - robotStartTime);
+    if(secondsFromStart >= 5 && !sessionActive && !marketReady) {
+        Print("🚨 ПРИНУДИТЕЛЬНЫЙ ЗАПУСК! Прошло ", secondsFromStart, " секунд - запускаем принудительно!");
+        ForceStartTrading();
+        return;
+    }
+    
+    // Показываем прогресс каждую секунду первые 10 секунд
+    if(secondsFromStart <= 10 && secondsFromStart != 0) {
+        static int lastSecond = 0;
+        if(secondsFromStart != lastSecond) {
+            Print("⏰ Прошло ", secondsFromStart, " сек | Готовность: ", (marketReady ? "ДА" : "НЕТ"), " | Сессия: ", (sessionActive ? "ДА" : "НЕТ"));
+            lastSecond = secondsFromStart;
+        }
+    }
+    
+    // Проверка соединения терминала
+    if(!TerminalInfoInteger(TERMINAL_CONNECTED)) {
+        connectionErrors++;
+        Print("⚠️ Терминал не подключен (Ошибка #", connectionErrors, ")");
+        return;
+    }
+    
+    // Проверка готовности рынка для VPS
+    if(!CheckMarketReadiness()) {
+        return;
+    }
+    
+    // Печать когда рынок становится готов
+    static bool wasReady = false;
+    if(marketReady && !wasReady) {
+        Print("🎉 Рынок готов! Переход к торговой логике...");
+        Comment("✅ СОВЕТНИК: MartingaleVPS_Enhanced v1.61\n" +
+                "📊 СТАТУС: РЫНОК ГОТОВ!\n" +
+                "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+                "💰 СИМВОЛ: " + tradingSymbol + "\n" +
+                "🎯 СЕССИЯ: " + (sessionActive ? "АКТИВНА" : "ОЖИДАНИЕ") + "\n" +
+                "🔢 ТИКОВ: " + IntegerToString(tickCounter) + "\n" +
+                "🔐 ЛИЦЕНЗИЯ: ДЕЙСТВИТЕЛЬНА");
+        wasReady = true;
+    }
+    
+    // Обновление информации о позициях
+    UpdatePositionsInfo();
+    
+    // Проверка торговых условий
+    CheckTradingConditions();
+    
+    // Проверка глобального Take Profit
+    CheckGlobalTakeProfit();
+    
+    // VPS-оптимизированный автозапуск
+    CheckVPSAutoStart();
+    
+    // Обновление статуса на графике каждые 50 тиков + ДИАГНОСТИКА
+    if(tickCounter % 50 == 0) {
+        string status = sessionActive ? "ТОРГУЕТ" : (marketReady ? "ОЖИДАНИЕ" : "ПОДГОТОВКА");
         
-        await query.answer("✅ Платеж подтвержден! Пользователь получил полную лицензию.")
+        // Подсчет позиций и ордеров
+        int ourPositions = 0;
+        int ourOrders = 0;
+        int buyStops = 0;
+        int sellStops = 0;
         
-    except Exception as e:
-        logger.error(f"Ошибка подтверждения платежа: {e}")
-        await query.answer("❌ Ошибка при подтверждении платежа!")
-
-async def handle_reject_payment(query, payment_info):
-    """Отклонение платежа администратором"""
-    if query.from_user.id != ADMIN_ID:
-        await query.answer("❌ У вас нет прав на это действие!")
-        return
-    
-    try:
-        parts = payment_info.split('_')
-        user_id = int(parts[0])
+        for(int i = 0; i < PositionsTotal(); i++) {
+            if(position.SelectByIndex(i)) {
+                if(position.Symbol() == tradingSymbol && position.Magic() == MagicNumber) {
+                    ourPositions++;
+                }
+            }
+        }
         
-        # Уведомляем пользователя об отклонении
-        await query.bot.send_message(
-            chat_id=user_id,
-            text="""
-❌ **Платеж отклонен**
-
-К сожалению, ваш платеж не может быть подтвержден.
-
-**Возможные причины:**
-• Неполная информация в чеке
-• Неверная сумма
-• Технические проблемы
-
-**Что делать:**
-• Проверьте правильность перевода
-• Отправьте новый скриншот
-• Обратитесь в поддержку: @Zair_Khudayberganov
-""",
-            parse_mode='Markdown'
-        )
+        for(int i = 0; i < OrdersTotal(); i++) {
+            if(order.SelectByIndex(i)) {
+                if(order.Symbol() == tradingSymbol && order.Magic() == MagicNumber) {
+                    ourOrders++;
+                    if(order.OrderType() == ORDER_TYPE_BUY_STOP) buyStops++;
+                    if(order.OrderType() == ORDER_TYPE_SELL_STOP) sellStops++;
+                }
+            }
+        }
         
-        # Обновляем сообщение админа
-        await query.edit_message_caption(
-            caption=f"❌ **ПЛАТЕЖ ОТКЛОНЕН**\n\n{query.message.caption}",
-            parse_mode='Markdown'
-        )
+        Comment("🤖 СОВЕТНИК: MartingaleVPS_Enhanced v1.61\n" +
+                "📊 СТАТУС: " + status + "\n" +
+                "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+                "💰 СИМВОЛ: " + tradingSymbol + "\n" +
+                "🔢 ТИКОВ: " + IntegerToString(tickCounter) + "\n" +
+                "💵 БАЛАНС: $" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + "\n" +
+                "📊 ПОЗИЦИИ: " + IntegerToString(ourPositions) + " | ОРДЕРА: " + IntegerToString(ourOrders) + "\n" +
+                "🔥 УДВОЕНИЙ: " + IntegerToString(doublingCount) + "/" + IntegerToString(MaxDoubling) + "\n" +
+                "🎯 BUY_STOP: " + IntegerToString(buyStops) + " | SELL_STOP: " + IntegerToString(sellStops) + "\n" +
+                "📦 В МАССИВЕ: " + IntegerToString(ArraySize(positions)) + "\n" +
+                "🔐 ЛИЦЕНЗИЯ: АКТИВНА | ✅ ПРОВЕРЕНА");
         
-        await query.answer("❌ Платеж отклонен. Пользователь уведомлен.")
+        // Периодическая детальная диагностика
+        if(tickCounter % 200 == 0 && sessionActive) {
+            Print("🔍 === ПЕРИОДИЧЕСКАЯ ДИАГНОСТИКА (ТИК ", tickCounter, ") ===");
+            Print("🔍 sessionActive=", sessionActive);
+            Print("🔍 doublingCount=", doublingCount);
+            Print("🔍 currentLot=", DoubleToString(currentLot, 3));
+            Print("🔍 Позиций в терминале=", ourPositions);
+            Print("🔍 Ордеров в терминале=", ourOrders);
+            Print("🔍 Позиций в массиве=", ArraySize(positions));
+            Print("🔍 Buy Stops=", buyStops, " | Sell Stops=", sellStops);
+            Print("🔐 Лицензия действительна=", licenseValid);
+            Print("🔐 Торговля заблокирована=", tradingBlocked);
+            
+            if(ourPositions > 1 && ourOrders == 0) {
+                Print("🚨 ПРОБЛЕМА: Много позиций но нет ордеров!");
+                Print("🚨 Это может быть причиной отсутствия следующих позиций!");
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| ВСЕ ОСТАЛЬНЫЕ ФУНКЦИИ ОСТАЮТСЯ БЕЗ ИЗМЕНЕНИЙ                   |
+//+------------------------------------------------------------------+
+
+//+------------------------------------------------------------------+
+//| Принудительный запуск торговли - АВАРИЙНАЯ ФУНКЦИЯ             |
+//+------------------------------------------------------------------+
+void ForceStartTrading() {
+    Print("🚨🚨🚨 ПРИНУДИТЕЛЬНЫЙ ЗАПУСК ТОРГОВЛИ! 🚨🚨🚨");
+    
+    // Обновление статуса на графике
+    Comment("🚨 СОВЕТНИК: MartingaleVPS_Enhanced v1.61\n" +
+            "📊 СТАТУС: ПРИНУДИТЕЛЬНЫЙ ЗАПУСК!\n" +
+            "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+            "💰 СИМВОЛ: " + tradingSymbol + "\n" +
+            "🚨 РЕЖИМ: ЭКСТРЕННЫЙ СТАРТ\n" +
+            "🔐 ЛИЦЕНЗИЯ: ПРОВЕРЕНА");
+    
+    // Принудительно готовим рынок
+    marketReady = true;
+    robotStarted = true;
+    
+    // Базовая проверка котировок
+    double bid = SymbolInfoDouble(tradingSymbol, SYMBOL_BID);
+    double ask = SymbolInfoDouble(tradingSymbol, SYMBOL_ASK);
+    
+    Print("💰 ПРИНУДИТЕЛЬНЫЕ котировки: Bid=", DoubleToString(bid, Digits()), " Ask=", DoubleToString(ask, Digits()));
+    
+    if(bid <= 0 || ask <= 0) {
+        Print("❌ КРИТИЧЕСКАЯ ОШИБКА: Нет котировок! Bid=", bid, " Ask=", ask);
+        Print("🔧 Проверьте:");
+        Print("   1. Подключение к интернету");
+        Print("   2. Настройки символа BTCUSD");
+        Print("   3. Работу торгового сервера");
+        return;
+    }
+    
+    // Быстрое определение тренда
+    long bidLong = (long)bid;
+    ENUM_POSITION_TYPE direction = (bidLong % 2 == 0) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+    
+    Print("🎯 ПРИНУДИТЕЛЬНОЕ направление: ", (direction == POSITION_TYPE_BUY ? "ПОКУПКА" : "ПРОДАЖА"));
+    
+    // Принудительный запуск сессии
+    StartNewSessionFast(direction);
+}
+
+//+------------------------------------------------------------------+
+//| Быстрый анализ тренда для быстрого старта                      |
+//+------------------------------------------------------------------+
+ENUM_POSITION_TYPE GetQuickTrend() {
+    Print("⚡ БЫСТРЫЙ анализ тренда...");
+    
+    double currentPrice = SymbolInfoDouble(tradingSymbol, SYMBOL_BID);
+    
+    // Простейший метод - по последней цифре цены
+    long priceLong = (long)currentPrice;
+    long lastDigit = priceLong % 10;
+    
+    if(lastDigit >= 5) {
+        Print("📈 БЫСТРЫЙ ТРЕНД: ПОКУПКА (цифра ", lastDigit, ")");
+        return POSITION_TYPE_BUY;
+    } else {
+        Print("📉 БЫСТРЫЙ ТРЕНД: ПРОДАЖА (цифра ", lastDigit, ")");
+        return POSITION_TYPE_SELL;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Быстрый старт сессии - МИНИМАЛЬНЫЕ ПРОВЕРКИ                    |
+//+------------------------------------------------------------------+
+void StartNewSessionFast(ENUM_POSITION_TYPE startDirection) {
+    Print("🚀🚀🚀 БЫСТРЫЙ СТАРТ СЕССИИ! 🚀🚀🚀");
+    Print("Направление: ", (startDirection == POSITION_TYPE_BUY ? "ПОКУПКА" : "ПРОДАЖА"));
+    
+    // Минимальная инициализация
+    currentLot = InitialLot;
+    doublingCount = 0;
+    sessionStartPrice = SymbolInfoDouble(tradingSymbol, SYMBOL_BID);
+    sessionActive = true;
+    
+    Print("💰 Цена старта: ", DoubleToString(sessionStartPrice, Digits()));
+    
+    // Быстрый расчет уровней
+    if(startDirection == POSITION_TYPE_BUY) {
+        sessionBuyLevel = sessionStartPrice;
+        sessionSellLevel = sessionBuyLevel - BuyStopPips * Point();
+    } else {
+        sessionSellLevel = sessionStartPrice;
+        sessionBuyLevel = sessionSellLevel + BuyStopPips * Point();
+    }
+    
+    sessionTP = sessionBuyLevel + TakeProfitPips * Point();
+    sessionSL = sessionSellLevel - TakeProfitPips * Point();
+    
+    Print("📍 БЫСТРЫЕ уровни:");
+    Print("   SELL: ", DoubleToString(sessionSellLevel, Digits()));
+    Print("   BUY: ", DoubleToString(sessionBuyLevel, Digits()));
+    Print("   TP: ", DoubleToString(sessionTP, Digits()));
+    Print("   SL: ", DoubleToString(sessionSL, Digits()));
+    
+    ArrayResize(positions, 0);
+    
+    // НЕМЕДЛЕННОЕ открытие позиции
+    bool success = false;
+    if(startDirection == POSITION_TYPE_BUY) {
+        success = OpenBuyPositionFast();
+    } else {
+        success = OpenSellPositionFast();
+    }
+    
+    if(success) {
+        Print("✅✅✅ СЕССИЯ ЗАПУЩЕНА УСПЕШНО! ✅✅✅");
+        Comment("🚀 СОВЕТНИК: MartingaleVPS_Enhanced v1.61\n" +
+                "📊 СТАТУС: СЕССИЯ АКТИВНА!\n" +
+                "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+                "💰 СИМВОЛ: " + tradingSymbol + "\n" +
+                "🎯 НАПРАВЛЕНИЕ: " + (startDirection == POSITION_TYPE_BUY ? "ПОКУПКА" : "ПРОДАЖА") + "\n" +
+                "💵 ЛОТ: " + DoubleToString(currentLot, 3) + "\n" +
+                "🔐 ЛИЦЕНЗИЯ: АКТИВНА");
+    } else {
+        Print("❌❌❌ ОШИБКА ЗАПУСКА СЕССИИ! ❌❌❌");
+        Comment("❌ СОВЕТНИК: MartingaleVPS_Enhanced v1.61\n" +
+                "📊 СТАТУС: ОШИБКА ЗАПУСКА!\n" +
+                "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+                "💰 СИМВОЛ: " + tradingSymbol + "\n" +
+                "🚨 ПРОБЛЕМА: Не удалось открыть позицию\n" +
+                "🔐 ЛИЦЕНЗИЯ: АКТИВНА");
+        sessionActive = false;
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Быстрое открытие BUY позиции                                   |
+//+------------------------------------------------------------------+
+bool OpenBuyPositionFast() {
+    Print("💰 БЫСТРОЕ открытие BUY позиции...");
+    
+    double ask = SymbolInfoDouble(tradingSymbol, SYMBOL_ASK);
+    
+    Print("💱 ASK цена: ", DoubleToString(ask, Digits()));
+    Print("💱 Лот: ", DoubleToString(currentLot, 3));
+    Print("💱 SL: ", DoubleToString(sessionSL, Digits()));
+    Print("💱 TP: ", DoubleToString(sessionTP, Digits()));
+    
+    if(trade.Buy(currentLot, tradingSymbol, ask, sessionSL, sessionTP, CommentPrefix + "_FASTBUY_0")) {
+        Print("✅ БЫСТРАЯ BUY позиция открыта!");
         
-    except Exception as e:
-        logger.error(f"Ошибка отклонения платежа: {e}")
-        await query.answer("❌ Ошибка при отклонении платежа!")
+        // Быстрая установка Sell Stop
+        double nextLot = currentLot * 2;
+        if(trade.SellStop(nextLot, sessionSellLevel, tradingSymbol, sessionTP, sessionSL, ORDER_TIME_GTC, 0, CommentPrefix + "_SELLSTOP_1")) {
+            Print("✅ Sell Stop установлен: ", DoubleToString(nextLot, 3), " лот");
+        } else {
+            Print("⚠️ Sell Stop не установлен: ", trade.ResultRetcode());
+        }
+        
+        return true;
+    } else {
+        Print("❌ Ошибка открытия BUY: ", trade.ResultRetcode());
+        return false;
+    }
+}
 
-async def start_from_callback(query):
-    """Возврат в главное меню из callback"""
-    user = query.from_user
-    db_user = db.get_user(user.id)
+//+------------------------------------------------------------------+
+//| Быстрое открытие SELL позиции                                  |
+//+------------------------------------------------------------------+
+bool OpenSellPositionFast() {
+    Print("💰 БЫСТРОЕ открытие SELL позиции...");
     
-    # Проверяем статус лицензии
-    has_active_license = False
-    if db_user.license_key and db_user.license_expiry:
-        has_active_license = db_user.license_expiry > datetime.datetime.now()
+    double bid = SymbolInfoDouble(tradingSymbol, SYMBOL_BID);
     
-    # Формируем клавиатуру
-    keyboard = []
+    Print("💱 BID цена: ", DoubleToString(bid, Digits()));
+    Print("💱 Лот: ", DoubleToString(currentLot, 3));
+    Print("💱 SL: ", DoubleToString(sessionTP, Digits()));
+    Print("💱 TP: ", DoubleToString(sessionSL, Digits()));
     
-    if not db_user.trial_used:
-        keyboard.append([InlineKeyboardButton("🆓 Получить 3 дня БЕСПЛАТНО", callback_data="get_trial")])
-    
-    if not has_active_license or db_user.license_type == 'trial':
-        keyboard.append([InlineKeyboardButton("💰 Купить полную лицензию ($100)", callback_data="buy_license")])
-    
-    keyboard.extend([
-        [InlineKeyboardButton("📊 Мой статус", callback_data="check_status")],
-        [InlineKeyboardButton("📖 Описание советника", callback_data="show_description")],
-        [InlineKeyboardButton("❓ Инструкция", callback_data="show_instructions")]
-    ])
-    
-    if has_active_license:
-        keyboard.append([InlineKeyboardButton("⬇️ Скачать EA файл", callback_data="download_ea")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    welcome_text = f"""
-🤖 **MartingaleEA License Bot**
+    if(trade.Sell(currentLot, tradingSymbol, bid, sessionTP, sessionSL, CommentPrefix + "_FASTSELL_0")) {
+        Print("✅ БЫСТРАЯ SELL позиция открыта!");
+        
+        // Быстрая установка Buy Stop
+        double nextLot = currentLot * 2;
+        if(trade.BuyStop(nextLot, sessionBuyLevel, tradingSymbol, sessionSL, sessionTP, ORDER_TIME_GTC, 0, CommentPrefix + "_BUYSTOP_1")) {
+            Print("✅ Buy Stop установлен: ", DoubleToString(nextLot, 3), " лот");
+        } else {
+            Print("⚠️ Buy Stop не установлен: ", trade.ResultRetcode());
+        }
+        
+        return true;
+    } else {
+        Print("❌ Ошибка открытия SELL: ", trade.ResultRetcode());
+        return false;
+    }
+}
 
-Добро пожаловать обратно, {user.first_name}! 👋
-
-Выберите действие:
-"""
+//+------------------------------------------------------------------+
+//| Проверка готовности рынка для VPS операций - БЫСТРАЯ ВЕРСИЯ    |
+//+------------------------------------------------------------------+
+bool CheckMarketReadiness() {
+    // ПРИНУДИТЕЛЬНЫЙ ЗАПУСК ЧЕРЕЗ 5 СЕКУНД!
+    if(TimeCurrent() - robotStartTime >= 5) {
+        if(!marketReady) {
+            Print("🚀 ПРИНУДИТЕЛЬНЫЙ ЗАПУСК! 5 секунд прошло - запускаем торговлю!");
+            marketReady = true;
+        }
+        return true;
+    }
     
-    await query.edit_message_text(welcome_text, reply_markup=reply_markup, parse_mode='Markdown')
-
-# Команды для администратора
-async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Статистика для администратора"""
-    if update.effective_user.id != ADMIN_ID:
-        return
+    // Минимальные проверки для быстрого старта
+    if(tickCounter < MinTicksForStart) {
+        return false;
+    }
     
-    stats = db.get_stats()
+    // Только базовая проверка котировок
+    double bid = SymbolInfoDouble(tradingSymbol, SYMBOL_BID);
+    double ask = SymbolInfoDouble(tradingSymbol, SYMBOL_ASK);
     
-    stats_text = f"""
-📊 **СТАТИСТИКА БОТА**
-
-👥 **Пользователи:**
-• Всего зарегистрировано: {stats['total_users']}
-• Использовали пробный период: {stats['trial_users']}
-• Активных полных лицензий: {stats['active_licenses']}
-
-💰 **Платежи:**
-• Подтвержденных платежей: {stats['confirmed_payments']}
-• Общая выручка: ${stats['confirmed_payments'] * LICENSE_PRICE}
-
-📁 **Скачивания:**
-• Всего скачиваний: {stats['total_downloads']}
-
-⏰ **Время:** {datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')}
-"""
+    if(bid > 0 && ask > 0 && ask > bid) {
+        if(!marketReady) {
+            double spread = (ask - bid) / Point();
+            Print("✅ БЫСТРЫЙ СТАРТ! Bid=", DoubleToString(bid, Digits()), " Ask=", DoubleToString(ask, Digits()), " Спред=", DoubleToString(spread, 1));
+            marketReady = true;
+        }
+        return true;
+    }
     
-    await update.message.reply_text(stats_text, parse_mode='Markdown')
+    return false;
+}
 
-def main():
-    """Запуск бота"""
-    # Создаем приложение
-    application = Application.builder().token(BOT_TOKEN).build()
+//+------------------------------------------------------------------+
+//| VPS-оптимизированная проверка автозапуска - БЫСТРАЯ ВЕРСИЯ     |
+//+------------------------------------------------------------------+
+void CheckVPSAutoStart() {
+    // БЫСТРАЯ ПРОВЕРКА - минимум условий
+    if(!marketReady || sessionActive) return;
     
-    # Регистрируем обработчики
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stats", admin_stats))
-    application.add_handler(CallbackQueryHandler(button_callback))
-    application.add_handler(MessageHandler(filters.PHOTO, handle_screenshot))
+    // Быстрая активация робота
+    if(!robotStarted) {
+        robotStarted = true;
+        lastSessionEnd = TimeCurrent() - DelayBetweenSessions;
+        Print("🚀 БЫСТРАЯ АКТИВАЦИЯ! Робот готов к торговле!");
+    }
     
-    # Запускаем бота
-    print("🤖 MartingaleEA License Bot запущен!")
-    print(f"📊 Админ: @Zair_Khudayberganov (ID: {ADMIN_ID})")
-    application.run_polling()
+    // Минимальная задержка между сессиями
+    if(TimeCurrent() - lastSessionEnd < DelayBetweenSessions) return;
+    
+    Print("🎯 БЫСТРЫЙ АНАЛИЗ ТРЕНДА...");
+    
+    // Простой и быстрый анализ тренда
+    ENUM_POSITION_TYPE trendDirection = GetQuickTrend();
+    
+    Print("🚀 НЕМЕДЛЕННЫЙ СТАРТ! Направление: ", (trendDirection == POSITION_TYPE_BUY ? "ПОКУПКА" : "ПРОДАЖА"));
+    
+    // Немедленный запуск сессии
+    StartNewSessionFast(trendDirection);
+}
 
-if __name__ == '__main__':
-    main()
+//+------------------------------------------------------------------+
+//| Проверка торговых условий                                       |
+//+------------------------------------------------------------------+
+void CheckTradingConditions() {
+    if(!sessionActive || !marketReady) return;
+    
+    CheckExecutedOrders();
+}
+
+//+------------------------------------------------------------------+
+//| Проверка исполненных ордеров                                   |
+//+------------------------------------------------------------------+
+void CheckExecutedOrders() {
+    static int lastPositionCount = -1;
+    static int lastOrderCount = -1;
+    int currentPositionCount = 0;
+    int currentOrderCount = 0;
+    
+    // Подсчитываем наши позиции и ордера
+    for(int i = 0; i < PositionsTotal(); i++) {
+        if(position.SelectByIndex(i)) {
+            if(position.Symbol() == tradingSymbol && position.Magic() == MagicNumber) {
+                currentPositionCount++;
+            }
+        }
+    }
+    
+    for(int i = 0; i < OrdersTotal(); i++) {
+        if(order.SelectByIndex(i)) {
+            if(order.Symbol() == tradingSymbol && order.Magic() == MagicNumber) {
+                currentOrderCount++;
+            }
+        }
+    }
+    
+    // Если количество изменилось - показываем детали
+    if(lastPositionCount != -1 && (currentPositionCount != lastPositionCount || currentOrderCount != lastOrderCount)) {
+        Print("🔄 === ИЗМЕНЕНИЕ В ТЕРМИНАЛЕ ===");
+        Print("🔄 Позиции: Было=", lastPositionCount, " Стало=", currentPositionCount);
+        Print("🔄 Ордера: Было=", lastOrderCount, " Стало=", currentOrderCount);
+        Print("🔄 Позиций в нашем массиве: ", ArraySize(positions));
+        
+        // Показываем все наши позиции
+        Print("🔄 === ВСЕ НАШИ ПОЗИЦИИ В ТЕРМИНАЛЕ ===");
+        for(int i = 0; i < PositionsTotal(); i++) {
+            if(position.SelectByIndex(i)) {
+                if(position.Symbol() == tradingSymbol && position.Magic() == MagicNumber) {
+                    Print("🔄 Позиция: ", position.Ticket(), 
+                          " | ", (position.PositionType() == POSITION_TYPE_BUY ? "BUY" : "SELL"),
+                          " | ", DoubleToString(position.Volume(), 3),
+                          " | ", DoubleToString(position.PriceOpen(), Digits()));
+                }
+            }
+        }
+        
+        // Показываем все наши ордера
+        Print("🔄 === ВСЕ НАШИ ОРДЕРА В ТЕРМИНАЛЕ ===");
+        for(int i = 0; i < OrdersTotal(); i++) {
+            if(order.SelectByIndex(i)) {
+                if(order.Symbol() == tradingSymbol && order.Magic() == MagicNumber) {
+                    Print("🔄 Ордер: ", order.Ticket(), 
+                          " | ", (order.OrderType() == ORDER_TYPE_BUY_STOP ? "BUY_STOP" : 
+                                 order.OrderType() == ORDER_TYPE_SELL_STOP ? "SELL_STOP" : "ДРУГОЙ"),
+                          " | ", DoubleToString(order.VolumeCurrent(), 3),
+                          " | ", DoubleToString(order.PriceOpen(), Digits()));
+                }
+            }
+        }
+    }
+    
+    lastPositionCount = currentPositionCount;
+    lastOrderCount = currentOrderCount;
+    
+    // Проверяем новые позиции (основная логика)
+    for(int i = 0; i < PositionsTotal(); i++) {
+        if(position.SelectByIndex(i)) {
+            if(position.Symbol() == tradingSymbol && position.Magic() == MagicNumber) {
+                bool found = false;
+                for(int j = 0; j < ArraySize(positions); j++) {
+                    if(positions[j].ticket == position.Ticket()) {
+                        found = true;
+                        break;
+                    }
+                }
+                
+                if(!found) {
+                    Print("🆕 === ОБНАРУЖЕНА НОВАЯ ПОЗИЦИЯ! ===");
+                    Print("🆕 Ticket: ", position.Ticket());
+                    Print("🆕 Тип: ", (position.PositionType() == POSITION_TYPE_BUY ? "BUY" : "SELL"));
+                    Print("🆕 Лот: ", DoubleToString(position.Volume(), 3));
+                    Print("🆕 Цена: ", DoubleToString(position.PriceOpen(), Digits()));
+                    Print("🆕 Время: ", TimeToString(position.Time()));
+                    Print("🆕 Размер массива ДО обработки: ", ArraySize(positions));
+                    
+                    ProcessNewPositionSafe();
+                    
+                    Print("🆕 Размер массива ПОСЛЕ обработки: ", ArraySize(positions));
+                    Print("🆕 === КОНЕЦ ОБРАБОТКИ НОВОЙ ПОЗИЦИИ ===");
+                }
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Обработка новой позиции с VPS безопасностью                    |
+//+------------------------------------------------------------------+
+void ProcessNewPositionSafe() {
+    Print("🆕 ============ ОБРАБОТКА НОВОЙ ПОЗИЦИИ ============");
+    Print("🆕 Тип: ", (position.PositionType() == POSITION_TYPE_BUY ? "ПОКУПКА" : "ПРОДАЖА"));
+    Print("🆕 Лот: ", DoubleToString(position.Volume(), 3));
+    Print("🆕 Цена: ", DoubleToString(position.PriceOpen(), Digits()));
+    Print("🆕 Ticket: ", position.Ticket());
+    Print("🆕 Время: ", TimeToString(position.Time()));
+    
+    // КРИТИЧЕСКАЯ ДИАГНОСТИКА МАССИВА ПОЗИЦИЙ
+    Print("🔍 === СОСТОЯНИЕ МАССИВА ПОЗИЦИЙ ДО ===");
+    Print("🔍 Размер массива: ", ArraySize(positions));
+    for(int k = 0; k < ArraySize(positions); k++) {
+        Print("🔍 Позиция #", k, ": Ticket=", positions[k].ticket, " | Тип=", positions[k].type, " | Лот=", DoubleToString(positions[k].lots, 3));
+    }
+    
+    bool isFirstPosition = (ArraySize(positions) == 0);
+    
+    Print("🔍 === ЛОГИКА ОПРЕДЕЛЕНИЯ ===");
+    Print("🔍 isFirstPosition=", isFirstPosition);
+    Print("🔍 doublingCount ДО=", doublingCount);
+    Print("🔍 currentLot ДО=", DoubleToString(currentLot, 3));
+    Print("🔍 sessionActive=", sessionActive);
+    
+    // ЛОГИКА ДЛЯ BUY ПОЗИЦИЙ
+    if(position.PositionType() == POSITION_TYPE_BUY) {
+        Print("📈 === ОБРАБОТКА BUY ПОЗИЦИИ ===");
+        
+        if(!isFirstPosition) {
+            Print("🔥 ЭТО НЕ ПЕРВАЯ ПОЗИЦИЯ! Увеличиваем счетчики...");
+            doublingCount++;
+            currentLot = InitialLot * MathPow(2, doublingCount);
+            Print("🔥 НОВЫЕ ЗНАЧЕНИЯ: doublingCount=", doublingCount, " | currentLot=", DoubleToString(currentLot, 3));
+            
+            // КРИТИЧЕСКАЯ ПРОВЕРКА ЛИМИТОВ
+            Print("🔍 Проверка лимитов: doublingCount=", doublingCount, " | MaxDoubling=", MaxDoubling);
+            Print("🔍 Проверка лота: currentLot=", DoubleToString(currentLot, 3), " | MaxLotSize=", DoubleToString(MaxLotSize, 3));
+            
+        } else {
+            Print("📝 ЭТО ПЕРВАЯ BUY ПОЗИЦИЯ В СЕССИИ");
+        }
+        
+        // Установка TP/SL с повторами
+        Print("🎯 Установка TP/SL для BUY...");
+        bool tpslResult = ModifyPositionSafe(position.Ticket(), sessionSL, sessionTP);
+        Print("🎯 Результат TP/SL: ", (tpslResult ? "УСПЕХ" : "ОШИБКА"));
+        
+        if(!isFirstPosition) {
+            Print("🚀 === ПОПЫТКА УСТАНОВКИ СЛЕДУЮЩЕГО SELL STOP ===");
+            Print("🚀 Текущие уровни сессии:");
+            Print("🚀 sessionSellLevel=", DoubleToString(sessionSellLevel, Digits()));
+            Print("🚀 sessionBuyLevel=", DoubleToString(sessionBuyLevel, Digits()));
+            Print("🚀 sessionTP=", DoubleToString(sessionTP, Digits()));
+            Print("🚀 sessionSL=", DoubleToString(sessionSL, Digits()));
+            
+            SetupNextSellStopSafe();
+        } else {
+            Print("ℹ️ Первая позиция - стоп уже должен быть установлен при открытии");
+        }
+        
+    // ЛОГИКА ДЛЯ SELL ПОЗИЦИЙ  
+    } else if(position.PositionType() == POSITION_TYPE_SELL) {
+        Print("📉 === ОБРАБОТКА SELL ПОЗИЦИИ ===");
+        
+        if(!isFirstPosition) {
+            Print("🔥 ЭТО НЕ ПЕРВАЯ ПОЗИЦИЯ! Увеличиваем счетчики...");
+            doublingCount++;
+            currentLot = InitialLot * MathPow(2, doublingCount);
+            Print("🔥 НОВЫЕ ЗНАЧЕНИЯ: doublingCount=", doublingCount, " | currentLot=", DoubleToString(currentLot, 3));
+            
+            // КРИТИЧЕСКАЯ ПРОВЕРКА ЛИМИТОВ
+            Print("🔍 Проверка лимитов: doublingCount=", doublingCount, " | MaxDoubling=", MaxDoubling);
+            Print("🔍 Проверка лота: currentLot=", DoubleToString(currentLot, 3), " | MaxLotSize=", DoubleToString(MaxLotSize, 3));
+            
+        } else {
+            Print("📝 ЭТО ПЕРВАЯ SELL ПОЗИЦИЯ В СЕССИИ");
+        }
+        
+        // Установка TP/SL с повторами
+        Print("🎯 Установка TP/SL для SELL...");
+        bool tpslResult = ModifyPositionSafe(position.Ticket(), sessionTP, sessionSL);
+        Print("🎯 Результат TP/SL: ", (tpslResult ? "УСПЕХ" : "ОШИБКА"));
+        
+        if(!isFirstPosition) {
+            Print("🚀 === ПОПЫТКА УСТАНОВКИ СЛЕДУЮЩЕГО BUY STOP ===");
+            Print("🚀 Текущие уровни сессии:");
+            Print("🚀 sessionSellLevel=", DoubleToString(sessionSellLevel, Digits()));
+            Print("🚀 sessionBuyLevel=", DoubleToString(sessionBuyLevel, Digits()));
+            Print("🚀 sessionTP=", DoubleToString(sessionTP, Digits()));
+            Print("🚀 sessionSL=", DoubleToString(sessionSL, Digits()));
+            
+            SetupNextBuyStopSafe();
+        } else {
+            Print("ℹ️ Первая позиция - стоп уже должен быть установлен при открытии");
+        }
+    }
+    
+    // ДОБАВЛЕНИЕ В МАССИВ (КРИТИЧЕСКИЙ МОМЕНТ!)
+    Print("📊 === ДОБАВЛЕНИЕ В МАССИВ ===");
+    Print("📊 Размер массива ДО добавления: ", ArraySize(positions));
+    AddPositionToArray();
+    Print("📊 Размер массива ПОСЛЕ добавления: ", ArraySize(positions));
+    
+    // ФИНАЛЬНАЯ ДИАГНОСТИКА
+    Print("🔍 === СОСТОЯНИЕ ПОСЛЕ ОБРАБОТКИ ===");
+    Print("🔍 doublingCount=", doublingCount);
+    Print("🔍 currentLot=", DoubleToString(currentLot, 3));
+    Print("🔍 Позиций в массиве=", ArraySize(positions));
+    
+    // ПРОВЕРКА ВСЕХ ОРДЕРОВ В ТЕРМИНАЛЕ
+    Print("📋 === ТЕКУЩИЕ ОРДЕРА В ТЕРМИНАЛЕ ===");
+    int totalOrders = OrdersTotal();
+    int ourOrders = 0;
+    
+    for(int i = 0; i < totalOrders; i++) {
+        if(order.SelectByIndex(i)) {
+            if(order.Symbol() == tradingSymbol && order.Magic() == MagicNumber) {
+                ourOrders++;
+                Print("📋 Ордер #", ourOrders, ": ", 
+                      (order.OrderType() == ORDER_TYPE_BUY_STOP ? "BUY_STOP" : 
+                       order.OrderType() == ORDER_TYPE_SELL_STOP ? "SELL_STOP" : "ДРУГОЙ"),
+                      " | Лот: ", DoubleToString(order.VolumeCurrent(), 3),
+                      " | Цена: ", DoubleToString(order.PriceOpen(), Digits()),
+                      " | Ticket: ", order.Ticket());
+            }
+        }
+    }
+    
+    Print("📋 Всего наших ордеров: ", ourOrders, " из ", totalOrders);
+    Print("🆕 ============ КОНЕЦ ОБРАБОТКИ ПОЗИЦИИ ============");
+}
+
+//+------------------------------------------------------------------+
+//| Безопасное изменение позиции                                   |
+//+------------------------------------------------------------------+
+bool ModifyPositionSafe(ulong ticket, double sl, double tp) {
+    for(int retry = 0; retry < MaxRetries; retry++) {
+        if(trade.PositionModify(ticket, sl, tp)) {
+            Print("✅ VPS Позиция изменена: TP=", DoubleToString(tp, Digits()), " SL=", DoubleToString(sl, Digits()));
+            return true;
+        } else {
+            Print("❌ Изменение позиции попытка ", retry + 1, " неудачна: ", trade.ResultRetcode());
+            if(retry < MaxRetries - 1) Sleep(RetryDelay);
+        }
+    }
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Безопасная установка следующего Buy Stop                       |
+//+------------------------------------------------------------------+
+void SetupNextBuyStopSafe() {
+    Print("🔍 ==================== УСТАНОВКА BUY STOP ====================");
+    Print("🔍 ВХОДНЫЕ ПАРАМЕТРЫ:");
+    Print("🔍   doublingCount=", doublingCount);
+    Print("🔍   MaxDoubling=", MaxDoubling);
+    Print("🔍   currentLot=", DoubleToString(currentLot, 3));
+    Print("🔍   sessionActive=", sessionActive);
+    
+    // ПРОВЕРКА 1: Лимит удвоений
+    if(doublingCount >= MaxDoubling) {
+        Print("❌ СТОП: Достигнут максимум удвоений (", doublingCount, "/", MaxDoubling, ")");
+        return;
+    }
+    
+    // ПРОВЕРКА 2: Существующие ордера
+    Print("🔍 Проверка существующих Buy Stop ордеров...");
+    bool orderExists = CheckOrderExists(ORDER_TYPE_BUY_STOP);
+    Print("🔍 Buy Stop уже существует: ", (orderExists ? "ДА" : "НЕТ"));
+    
+    if(orderExists) {
+        Print("⚠️ СТОП: Buy Stop уже установлен");
+        return;
+    }
+    
+    // ПРОВЕРКА 3: Валидность уровней сессии
+    Print("🔍 ПРОВЕРКА УРОВНЕЙ СЕССИИ:");
+    Print("🔍   sessionBuyLevel=", DoubleToString(sessionBuyLevel, Digits()));
+    Print("🔍   sessionSellLevel=", DoubleToString(sessionSellLevel, Digits()));
+    Print("🔍   sessionTP=", DoubleToString(sessionTP, Digits()));
+    Print("🔍   sessionSL=", DoubleToString(sessionSL, Digits()));
+    
+    if(sessionBuyLevel <= 0 || sessionSL <= 0 || sessionTP <= 0) {
+        Print("❌ КРИТИЧЕСКАЯ ОШИБКА: Неверные уровни сессии!");
+        Print("❌   sessionBuyLevel=", sessionBuyLevel);
+        Print("❌   sessionSL=", sessionSL);
+        Print("❌   sessionTP=", sessionTP);
+        return;
+    }
+    
+    // ПРОВЕРКА 4: Расчет следующего лота
+    double nextLot = currentLot * 2;
+    double limitedLot = MathMin(nextLot, MaxLotSize);
+    
+    Print("🔍 РАСЧЕТ ЛОТА:");
+    Print("🔍   currentLot * 2 = ", DoubleToString(nextLot, 3));
+    Print("🔍   MaxLotSize = ", DoubleToString(MaxLotSize, 3));
+    Print("🔍   Финальный лот = ", DoubleToString(limitedLot, 3));
+    
+    if(limitedLot != nextLot) {
+        Print("⚠️ ВНИМАНИЕ: Лот ограничен максимумом (", DoubleToString(nextLot, 3), " → ", DoubleToString(limitedLot, 3), ")");
+    }
+    
+    // ПРОВЕРКА 5: Минимальные требования брокера
+    double minLot = SymbolInfoDouble(tradingSymbol, SYMBOL_VOLUME_MIN);
+    double maxLot = SymbolInfoDouble(tradingSymbol, SYMBOL_VOLUME_MAX);
+    double stepLot = SymbolInfoDouble(tradingSymbol, SYMBOL_VOLUME_STEP);
+    
+    Print("🔍 ТРЕБОВАНИЯ БРОКЕРА:");
+    Print("🔍   Min Lot: ", DoubleToString(minLot, 3));
+    Print("🔍   Max Lot: ", DoubleToString(maxLot, 3));
+    Print("🔍   Step Lot: ", DoubleToString(stepLot, 3));
+    
+    if(limitedLot < minLot || limitedLot > maxLot) {
+        Print("❌ ОШИБКА: Лот вне допустимого диапазона!");
+        return;
+    }
+    
+    // ФИНАЛЬНАЯ ПОПЫТКА УСТАНОВКИ
+    Print("🚀 ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ! Запуск установки Buy Stop...");
+    Print("🚀 Параметры:");
+    Print("🚀   Лот: ", DoubleToString(limitedLot, 3));
+    Print("🚀   Цена: ", DoubleToString(sessionBuyLevel, Digits()));
+    Print("🚀   SL: ", DoubleToString(sessionSL, Digits()));
+    Print("🚀   TP: ", DoubleToString(sessionTP, Digits()));
+    
+    bool result = SetBuyStopSafe(limitedLot);
+    
+    Print("🚀 РЕЗУЛЬТАТ УСТАНОВКИ BUY STOP: ", (result ? "✅ УСПЕХ" : "❌ НЕУДАЧА"));
+    Print("🔍 ==================== КОНЕЦ УСТАНОВКИ BUY STOP ====================");
+}
+
+//+------------------------------------------------------------------+
+//| Безопасная установка следующего Sell Stop                      |
+//+------------------------------------------------------------------+
+void SetupNextSellStopSafe() {
+    Print("🔍 ==================== УСТАНОВКА SELL STOP ====================");
+    Print("🔍 ВХОДНЫЕ ПАРАМЕТРЫ:");
+    Print("🔍   doublingCount=", doublingCount);
+    Print("🔍   MaxDoubling=", MaxDoubling);
+    Print("🔍   currentLot=", DoubleToString(currentLot, 3));
+    Print("🔍   sessionActive=", sessionActive);
+    
+    // ПРОВЕРКА 1: Лимит удвоений
+    if(doublingCount >= MaxDoubling) {
+        Print("❌ СТОП: Достигнут максимум удвоений (", doublingCount, "/", MaxDoubling, ")");
+        return;
+    }
+    
+    // ПРОВЕРКА 2: Существующие ордера
+    Print("🔍 Проверка существующих Sell Stop ордеров...");
+    bool orderExists = CheckOrderExists(ORDER_TYPE_SELL_STOP);
+    Print("🔍 Sell Stop уже существует: ", (orderExists ? "ДА" : "НЕТ"));
+    
+    if(orderExists) {
+        Print("⚠️ СТОП: Sell Stop уже установлен");
+        return;
+    }
+    
+    // ПРОВЕРКА 3: Валидность уровней сессии
+    Print("🔍 ПРОВЕРКА УРОВНЕЙ СЕССИИ:");
+    Print("🔍   sessionSellLevel=", DoubleToString(sessionSellLevel, Digits()));
+    Print("🔍   sessionBuyLevel=", DoubleToString(sessionBuyLevel, Digits()));
+    Print("🔍   sessionTP=", DoubleToString(sessionTP, Digits()));
+    Print("🔍   sessionSL=", DoubleToString(sessionSL, Digits()));
+    
+    if(sessionSellLevel <= 0 || sessionSL <= 0 || sessionTP <= 0) {
+        Print("❌ КРИТИЧЕСКАЯ ОШИБКА: Неверные уровни сессии!");
+        Print("❌   sessionSellLevel=", sessionSellLevel);
+        Print("❌   sessionSL=", sessionSL);
+        Print("❌   sessionTP=", sessionTP);
+        return;
+    }
+    
+    // ПРОВЕРКА 4: Расчет следующего лота
+    double nextLot = currentLot * 2;
+    double limitedLot = MathMin(nextLot, MaxLotSize);
+    
+    Print("🔍 РАСЧЕТ ЛОТА:");
+    Print("🔍   currentLot * 2 = ", DoubleToString(nextLot, 3));
+    Print("🔍   MaxLotSize = ", DoubleToString(MaxLotSize, 3));
+    Print("🔍   Финальный лот = ", DoubleToString(limitedLot, 3));
+    
+    if(limitedLot != nextLot) {
+        Print("⚠️ ВНИМАНИЕ: Лот ограничен максимумом (", DoubleToString(nextLot, 3), " → ", DoubleToString(limitedLot, 3), ")");
+    }
+    
+    // ПРОВЕРКА 5: Минимальные требования брокера
+    double minLot = SymbolInfoDouble(tradingSymbol, SYMBOL_VOLUME_MIN);
+    double maxLot = SymbolInfoDouble(tradingSymbol, SYMBOL_VOLUME_MAX);
+    double stepLot = SymbolInfoDouble(tradingSymbol, SYMBOL_VOLUME_STEP);
+    
+    Print("🔍 ТРЕБОВАНИЯ БРОКЕРА:");
+    Print("🔍   Min Lot: ", DoubleToString(minLot, 3));
+    Print("🔍   Max Lot: ", DoubleToString(maxLot, 3));
+    Print("🔍   Step Lot: ", DoubleToString(stepLot, 3));
+    
+    if(limitedLot < minLot || limitedLot > maxLot) {
+        Print("❌ ОШИБКА: Лот вне допустимого диапазона!");
+        return;
+    }
+    
+    // ФИНАЛЬНАЯ ПОПЫТКА УСТАНОВКИ
+    Print("🚀 ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ! Запуск установки Sell Stop...");
+    Print("🚀 Параметры:");
+    Print("🚀   Лот: ", DoubleToString(limitedLot, 3));
+    Print("🚀   Цена: ", DoubleToString(sessionSellLevel, Digits()));
+    Print("🚀   SL: ", DoubleToString(sessionTP, Digits()));
+    Print("🚀   TP: ", DoubleToString(sessionSL, Digits()));
+    
+    bool result = SetSellStopSafe(limitedLot);
+    
+    Print("🚀 РЕЗУЛЬТАТ УСТАНОВКИ SELL STOP: ", (result ? "✅ УСПЕХ" : "❌ НЕУДАЧА"));
+    Print("🔍 ==================== КОНЕЦ УСТАНОВКИ SELL STOP ====================");
+}
+
+//+------------------------------------------------------------------+
+//| Безопасная установка Buy Stop                                  |
+//+------------------------------------------------------------------+
+bool SetBuyStopSafe(double lotSize) {
+    Print("💰 === УСТАНОВКА BUY STOP ===");
+    Print("💰 Лот: ", DoubleToString(lotSize, 3));
+    Print("💰 Цена: ", DoubleToString(sessionBuyLevel, Digits()));
+    Print("💰 SL: ", DoubleToString(sessionSL, Digits()));
+    Print("💰 TP: ", DoubleToString(sessionTP, Digits()));
+    
+    // Проверки перед установкой
+    double currentPrice = SymbolInfoDouble(tradingSymbol, SYMBOL_BID);
+    Print("💰 Текущая цена: ", DoubleToString(currentPrice, Digits()));
+    
+    if(sessionBuyLevel <= currentPrice) {
+        Print("❌ ОШИБКА: Buy Stop цена (", DoubleToString(sessionBuyLevel, Digits()), 
+              ") должна быть выше текущей цены (", DoubleToString(currentPrice, Digits()), ")");
+        return false;
+    }
+    
+    // Проверка минимального расстояния
+    double minStopsLevel = SymbolInfoInteger(tradingSymbol, SYMBOL_TRADE_STOPS_LEVEL) * Point();
+    double distance = sessionBuyLevel - currentPrice;
+    
+    Print("💰 Минимальное расстояние: ", DoubleToString(minStopsLevel, Digits()));
+    Print("💰 Наше расстояние: ", DoubleToString(distance, Digits()));
+    
+    if(distance < minStopsLevel && minStopsLevel > 0) {
+        Print("❌ ОШИБКА: Слишком близко к цене. Требуется: ", DoubleToString(minStopsLevel, Digits()));
+        return false;
+    }
+    
+    for(int retry = 0; retry < MaxRetries; retry++) {
+        Print("💰 Попытка установки Buy Stop #", retry + 1);
+        
+        if(trade.BuyStop(lotSize, sessionBuyLevel, tradingSymbol, sessionSL, sessionTP, ORDER_TIME_GTC, 0, CommentPrefix + "_BUYSTOP_" + IntegerToString(doublingCount + 1))) {
+            Print("✅ VPS Buy Stop установлен УСПЕШНО! Лот: ", DoubleToString(lotSize, 3));
+            Print("✅ Ticket: ", trade.ResultOrder());
+            return true;
+        } else {
+            Print("❌ Buy Stop попытка ", retry + 1, " неудачна. Код ошибки: ", trade.ResultRetcode());
+            Print("❌ Описание ошибки: ", trade.ResultRetcodeDescription());
+            
+            // Дополнительная диагностика
+            if(trade.ResultRetcode() == TRADE_RETCODE_INVALID_STOPS) {
+                Print("❌ Неверные стопы! Проверьте расчеты TP/SL");
+            } else if(trade.ResultRetcode() == TRADE_RETCODE_INVALID_PRICE) {
+                Print("❌ Неверная цена! Цена Buy Stop: ", DoubleToString(sessionBuyLevel, Digits()));
+            } else if(trade.ResultRetcode() == TRADE_RETCODE_INVALID_VOLUME) {
+                Print("❌ Неверный объем! Лот: ", DoubleToString(lotSize, 3));
+            }
+            
+            if(retry < MaxRetries - 1) {
+                Print("⏳ Ожидание ", RetryDelay, " мс перед повтором...");
+                Sleep(RetryDelay);
+                // Обновляем цены
+                currentPrice = SymbolInfoDouble(tradingSymbol, SYMBOL_BID);
+            }
+        }
+    }
+    
+    Print("❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось установить Buy Stop после ", MaxRetries, " попыток!");
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Безопасная установка Sell Stop                                 |
+//+------------------------------------------------------------------+
+bool SetSellStopSafe(double lotSize) {
+    Print("💰 === УСТАНОВКА SELL STOP ===");
+    Print("💰 Лот: ", DoubleToString(lotSize, 3));
+    Print("💰 Цена: ", DoubleToString(sessionSellLevel, Digits()));
+    Print("💰 SL: ", DoubleToString(sessionTP, Digits()));
+    Print("💰 TP: ", DoubleToString(sessionSL, Digits()));
+    
+    // Проверки перед установкой
+    double currentPrice = SymbolInfoDouble(tradingSymbol, SYMBOL_ASK);
+    Print("💰 Текущая цена: ", DoubleToString(currentPrice, Digits()));
+    
+    if(sessionSellLevel >= currentPrice) {
+        Print("❌ ОШИБКА: Sell Stop цена (", DoubleToString(sessionSellLevel, Digits()), 
+              ") должна быть ниже текущей цены (", DoubleToString(currentPrice, Digits()), ")");
+        return false;
+    }
+    
+    // Проверка минимального расстояния
+    double minStopsLevel = SymbolInfoInteger(tradingSymbol, SYMBOL_TRADE_STOPS_LEVEL) * Point();
+    double distance = currentPrice - sessionSellLevel;
+    
+    Print("💰 Минимальное расстояние: ", DoubleToString(minStopsLevel, Digits()));
+    Print("💰 Наше расстояние: ", DoubleToString(distance, Digits()));
+    
+    if(distance < minStopsLevel && minStopsLevel > 0) {
+        Print("❌ ОШИБКА: Слишком близко к цене. Требуется: ", DoubleToString(minStopsLevel, Digits()));
+        return false;
+    }
+    
+    for(int retry = 0; retry < MaxRetries; retry++) {
+        Print("💰 Попытка установки Sell Stop #", retry + 1);
+        
+        if(trade.SellStop(lotSize, sessionSellLevel, tradingSymbol, sessionTP, sessionSL, ORDER_TIME_GTC, 0, CommentPrefix + "_SELLSTOP_" + IntegerToString(doublingCount + 1))) {
+            Print("✅ VPS Sell Stop установлен УСПЕШНО! Лот: ", DoubleToString(lotSize, 3));
+            Print("✅ Ticket: ", trade.ResultOrder());
+            return true;
+        } else {
+            Print("❌ Sell Stop попытка ", retry + 1, " неудачна. Код ошибки: ", trade.ResultRetcode());
+            Print("❌ Описание ошибки: ", trade.ResultRetcodeDescription());
+            
+            // Дополнительная диагностика
+            if(trade.ResultRetcode() == TRADE_RETCODE_INVALID_STOPS) {
+                Print("❌ Неверные стопы! Проверьте расчеты TP/SL");
+            } else if(trade.ResultRetcode() == TRADE_RETCODE_INVALID_PRICE) {
+                Print("❌ Неверная цена! Цена Sell Stop: ", DoubleToString(sessionSellLevel, Digits()));
+            } else if(trade.ResultRetcode() == TRADE_RETCODE_INVALID_VOLUME) {
+                Print("❌ Неверный объем! Лот: ", DoubleToString(lotSize, 3));
+            }
+            
+            if(retry < MaxRetries - 1) {
+                Print("⏳ Ожидание ", RetryDelay, " мс перед повтором...");
+                Sleep(RetryDelay);
+                // Обновляем цены
+                currentPrice = SymbolInfoDouble(tradingSymbol, SYMBOL_ASK);
+            }
+        }
+    }
+    
+    Print("❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось установить Sell Stop после ", MaxRetries, " попыток!");
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Проверка глобального Take Profit                               |
+//+------------------------------------------------------------------+
+void CheckGlobalTakeProfit() {
+    if(!sessionActive) return;
+    
+    double totalProfit = 0;
+    int activePositions = 0;
+    
+    for(int i = 0; i < PositionsTotal(); i++) {
+        if(position.SelectByIndex(i)) {
+            if(position.Symbol() == tradingSymbol && position.Magic() == MagicNumber) {
+                totalProfit += position.Profit() + position.Swap() + position.Commission();
+                activePositions++;
+            }
+        }
+    }
+    
+    if(activePositions > 1) {
+        double targetProfit = TakeProfitPips * pipValue * InitialLot;
+        
+        if(totalProfit >= targetProfit && ResetAfterTP) {
+            Print("🎉 VPS ГЛОБАЛЬНЫЙ TP! Прибыль: $", DoubleToString(totalProfit, 2));
+            CloseAllPositionsAndOrders();
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Обновление информации о позициях                               |
+//+------------------------------------------------------------------+
+void UpdatePositionsInfo() {
+    for(int i = ArraySize(positions) - 1; i >= 0; i--) {
+        if(!position.SelectByTicket(positions[i].ticket)) {
+            Print("📈 VPS Позиция закрыта: ", positions[i].ticket, " - СЕССИЯ ЗАВЕРШЕНА");
+            CloseAllPositionsAndOrders();
+            return;
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Закрытие всех позиций и ордеров                                |
+//+------------------------------------------------------------------+
+void CloseAllPositionsAndOrders() {
+    Print("🔄 VPS Закрытие всех позиций и ордеров...");
+    
+    for(int i = PositionsTotal() - 1; i >= 0; i--) {
+        if(position.SelectByIndex(i)) {
+            if(position.Symbol() == tradingSymbol && position.Magic() == MagicNumber) {
+                trade.PositionClose(position.Ticket());
+            }
+        }
+    }
+    
+    for(int i = OrdersTotal() - 1; i >= 0; i--) {
+        if(order.SelectByIndex(i)) {
+            if(order.Symbol() == tradingSymbol && order.Magic() == MagicNumber) {
+                trade.OrderDelete(order.Ticket());
+            }
+        }
+    }
+    
+    sessionActive = false;
+    lastSessionEnd = TimeCurrent();
+    ArrayResize(positions, 0);
+    
+    Comment("✅ СОВЕТНИК: MartingaleVPS_Enhanced v1.61\n" +
+            "📊 СТАТУС: СЕССИЯ ЗАКРЫТА\n" +
+            "⏰ ВРЕМЯ: " + TimeToString(TimeCurrent()) + "\n" +
+            "💰 СИМВОЛ: " + tradingSymbol + "\n" +
+            "🔄 ПЕРЕЗАПУСК ЧЕРЕЗ: " + IntegerToString(DelayBetweenSessions) + " сек\n" +
+            "🤖 РЕЖИМ: AUTO\n" +
+            "🔐 ЛИЦЕНЗИЯ: АКТИВНА");
+    
+    Print("✅ VPS Сессия закрыта. Авто-перезапуск через ", DelayBetweenSessions, " секунд");
+}
+
+//+------------------------------------------------------------------+
+//| Добавление позиции в массив                                    |
+//+------------------------------------------------------------------+
+void AddPositionToArray() {
+    Print("📊 === ДОБАВЛЕНИЕ ПОЗИЦИИ В МАССИВ ===");
+    
+    int size = ArraySize(positions);
+    Print("📊 Текущий размер массива: ", size);
+    
+    // Проверяем, не добавлена ли уже эта позиция
+    for(int i = 0; i < size; i++) {
+        if(positions[i].ticket == position.Ticket()) {
+            Print("⚠️ ПОЗИЦИЯ УЖЕ В МАССИВЕ! Ticket: ", position.Ticket(), " на индексе ", i);
+            return;
+        }
+    }
+    
+    ArrayResize(positions, size + 1);
+    Print("📊 Массив увеличен до размера: ", ArraySize(positions));
+    
+    positions[size].ticket = position.Ticket();
+    positions[size].type = position.PositionType();
+    positions[size].lots = position.Volume();
+    positions[size].openPrice = position.PriceOpen();
+    positions[size].takeProfit = position.TakeProfit();
+    positions[size].stopLoss = position.StopLoss();
+    positions[size].openTime = position.Time();
+    
+    Print("📊 ПОЗИЦИЯ ДОБАВЛЕНА:");
+    Print("📊   Индекс: ", size);
+    Print("📊   Ticket: ", positions[size].ticket);
+    Print("📊   Тип: ", (positions[size].type == POSITION_TYPE_BUY ? "BUY" : "SELL"));
+    Print("📊   Лот: ", DoubleToString(positions[size].lots, 3));
+    Print("📊   Цена: ", DoubleToString(positions[size].openPrice, Digits()));
+    Print("📊   TP: ", DoubleToString(positions[size].takeProfit, Digits()));
+    Print("📊   SL: ", DoubleToString(positions[size].stopLoss, Digits()));
+    Print("📊   Время: ", TimeToString(positions[size].openTime));
+    
+    Print("📊 === ВЕСЬ МАССИВ ПОСЛЕ ДОБАВЛЕНИЯ ===");
+    for(int j = 0; j < ArraySize(positions); j++) {
+        Print("📊 [", j, "] Ticket: ", positions[j].ticket, 
+              " | Тип: ", (positions[j].type == POSITION_TYPE_BUY ? "BUY" : "SELL"),
+              " | Лот: ", DoubleToString(positions[j].lots, 3));
+    }
+    Print("📊 === КОНЕЦ МАССИВА ===");
+}
+
+//+------------------------------------------------------------------+
+//| Проверка существующих позиций при запуске                      |
+//+------------------------------------------------------------------+
+void CheckExistingPositions() {
+    int posCount = 0;
+    
+    for(int i = 0; i < PositionsTotal(); i++) {
+        if(position.SelectByIndex(i)) {
+            if(position.Symbol() == tradingSymbol && position.Magic() == MagicNumber) {
+                posCount++;
+                sessionActive = true;
+                robotStarted = true;
+                marketReady = true;
+                AddPositionToArray();
+            }
+        }
+    }
+    
+    if(posCount > 0) {
+        Print("📊 VPS Найдены существующие позиции: ", posCount, " | Сессия возобновлена");
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Проверка существования ордера                                  |
+//+------------------------------------------------------------------+
+bool CheckOrderExists(ENUM_ORDER_TYPE orderType) {
+    Print("🔍 === ПРОВЕРКА СУЩЕСТВУЮЩИХ ОРДЕРОВ ===");
+    Print("🔍 Ищем тип ордера: ", orderType, " (", 
+          (orderType == ORDER_TYPE_BUY_STOP ? "BUY_STOP" : 
+           orderType == ORDER_TYPE_SELL_STOP ? "SELL_STOP" : "ДРУГОЙ"), ")");
+    Print("🔍 Всего ордеров в терминале: ", OrdersTotal());
+    
+    int ourOrders = 0;
+    int targetOrders = 0;
+    
+    for(int i = 0; i < OrdersTotal(); i++) {
+        if(order.SelectByIndex(i)) {
+            bool isOurSymbol = (order.Symbol() == tradingSymbol);
+            bool isOurMagic = (order.Magic() == MagicNumber);
+            bool isTargetType = (order.OrderType() == orderType);
+            
+            if(isOurSymbol && isOurMagic) {
+                ourOrders++;
+                Print("🔍 Найден наш ордер #", i, ": ", 
+                      order.OrderType(), " | Ticket: ", order.Ticket(), 
+                      " | Лот: ", DoubleToString(order.VolumeCurrent(), 3),
+                      " | Цена: ", DoubleToString(order.PriceOpen(), Digits()));
+                      
+                if(isTargetType) {
+                    targetOrders++;
+                    Print("✅ НАЙДЕН целевой ордер! Ticket: ", order.Ticket());
+                }
+            }
+        }
+    }
+    
+    Print("🔍 Наших ордеров всего: ", ourOrders);
+    Print("🔍 Целевых ордеров: ", targetOrders);
+    Print("🔍 === КОНЕЦ ПРОВЕРКИ ОРДЕРОВ ===");
+    
+    return (targetOrders > 0);
+}
+
+//+------------------------------------------------------------------+
+//| Расчет стоимости пункта                                        |
+//+------------------------------------------------------------------+
+void CalculatePipValue() {
+    pipValue = SymbolInfoDouble(tradingSymbol, SYMBOL_TRADE_TICK_VALUE);
+    Print("💱 VPS Стоимость пункта: ", DoubleToString(pipValue, 5));
+}
+
+//+------------------------------------------------------------------+
+//| Диагностическая функция - показывает все параметры символа     |
+//+------------------------------------------------------------------+
+void ShowSymbolInfo() {
+    Print("📊 === ИНФОРМАЦИЯ О СИМВОЛЕ ", tradingSymbol, " ===");
+    Print("💰 Bid: ", DoubleToString(SymbolInfoDouble(tradingSymbol, SYMBOL_BID), Digits()));
+    Print("💰 Ask: ", DoubleToString(SymbolInfoDouble(tradingSymbol, SYMBOL_ASK), Digits()));
+    Print("📏 Point: ", DoubleToString(Point(), _Digits));
+    Print("📏 Digits: ", Digits());
+    Print("💱 Tick Value: ", DoubleToString(SymbolInfoDouble(tradingSymbol, SYMBOL_TRADE_TICK_VALUE), 5));
+    Print("📊 Min Lot: ", DoubleToString(SymbolInfoDouble(tradingSymbol, SYMBOL_VOLUME_MIN), 3));
+    Print("📊 Max Lot: ", DoubleToString(SymbolInfoDouble(tradingSymbol, SYMBOL_VOLUME_MAX), 3));
+    Print("📊 Lot Step: ", DoubleToString(SymbolInfoDouble(tradingSymbol, SYMBOL_VOLUME_STEP), 3));
+    Print("🔓 Trade Mode: ", SymbolInfoInteger(tradingSymbol, SYMBOL_TRADE_MODE));
+    Print("📊 Contract Size: ", DoubleToString(SymbolInfoDouble(tradingSymbol, SYMBOL_TRADE_CONTRACT_SIZE), 2));
+    Print("📊 === КОНЕЦ ИНФОРМАЦИИ О СИМВОЛЕ ===");
+}
