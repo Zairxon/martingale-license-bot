@@ -8,7 +8,20 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 # Конфигурация бота
 TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_ID = int(os.getenv('ADMIN_ID', '295608267'))
+
+# ИСПРАВЛЕНИЕ: Улучшенная обработка ADMIN_ID
+def get_admin_id():
+    """Получение и проверка ADMIN_ID"""
+    admin_id_str = os.getenv('ADMIN_ID', '295608267')
+    try:
+        admin_id = int(admin_id_str)
+        print(f"✅ ADMIN_ID успешно загружен: {admin_id} (тип: {type(admin_id)})")
+        return admin_id
+    except ValueError:
+        print(f"❌ Ошибка преобразования ADMIN_ID: '{admin_id_str}' в число")
+        return 295608267  # Значение по умолчанию
+
+ADMIN_ID = get_admin_id()
 DB_FILE = 'licenses.db'
 
 # Цена полной лицензии в долларах
@@ -114,6 +127,27 @@ Buy Stop Distance: 150 пунктов
 🆘 **ПОДДЕРЖКА:**
 При проблемах с настройкой обращайтесь к администратору.
 """
+
+def is_admin(user_id):
+    """ИСПРАВЛЕННАЯ функция проверки админа"""
+    try:
+        # Приводим оба значения к int для сравнения
+        user_id_int = int(user_id)
+        admin_id_int = int(ADMIN_ID)
+        
+        result = user_id_int == admin_id_int
+        
+        # Отладочная информация
+        print(f"🔍 Проверка админа:")
+        print(f"  User ID: {user_id_int} (тип: {type(user_id_int)})")
+        print(f"  Admin ID: {admin_id_int} (тип: {type(admin_id_int)})")
+        print(f"  Результат: {result}")
+        
+        return result
+        
+    except (ValueError, TypeError) as e:
+        print(f"❌ Ошибка в проверке админа: {e}")
+        return False
 
 def init_database():
     """Инициализация базы данных"""
@@ -534,7 +568,7 @@ async def handle_admin_stats(message):
 
 async def handle_admin_upload_ea(message):
     """Обработчик загрузки EA файла админом"""
-    if message.from_user.id != ADMIN_ID:
+    if not is_admin(message.from_user.id):
         await message.reply_text("❌ Доступ запрещен!")
         return
     
@@ -594,16 +628,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     user_id = message.from_user.id
     text = message.text
-
-    # ОТЛАДКА - УДАЛИТЬ ПОЗЖЕ
-    print(f"🔍 Получено сообщение: '{text}' от пользователя {user_id}")
-    print(f"🔍 ADMIN_ID = {ADMIN_ID}")
-    print(f"🔍 Пользователь админ? {user_id == ADMIN_ID}")
+    
     # Регистрируем пользователя если новый
     register_user(user_id, message.from_user.username or "Unknown")
     
-    # Админские команды
-    if user_id == ADMIN_ID:
+    # ИСПРАВЛЕННАЯ проверка админа
+    if is_admin(user_id):
+        print(f"✅ Админ {user_id} выполняет команду: {text}")
+        
         if text == "/stats":
             await handle_admin_stats(message)
             return
@@ -618,6 +650,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif message.document:
             await handle_admin_upload_ea(message)
             return
+    else:
+        print(f"❌ Пользователь {user_id} не является админом")
     
     # Обычные команды
     if text == "/start":
