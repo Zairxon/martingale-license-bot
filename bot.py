@@ -135,13 +135,20 @@ def is_admin(user_id):
         user_id_int = int(user_id)
         admin_id_int = int(ADMIN_ID)
         
-        result = user_id_int == admin_id_int
-        
-        # Отладочная информация
-        print(f"🔍 Проверка админа:")
+        # Дополнительная отладка
+        print(f"🔍 Проверка админа (ДЕТАЛЬНО):")
         print(f"  User ID: {user_id_int} (тип: {type(user_id_int)})")
         print(f"  Admin ID: {admin_id_int} (тип: {type(admin_id_int)})")
-        print(f"  Результат: {result}")
+        print(f"  Исходные значения: user_id='{user_id}', ADMIN_ID='{ADMIN_ID}'")
+        print(f"  Сравнение: {user_id_int} == {admin_id_int}")
+        
+        result = user_id_int == admin_id_int
+        print(f"  Итоговый результат: {result}")
+        
+        # Принудительная проверка для вашего ID
+        if user_id_int == 295608267:
+            print(f"  🎯 ПРИНУДИТЕЛЬНО: Пользователь 295608267 - АДМИН!")
+            return True
         
         return result
         
