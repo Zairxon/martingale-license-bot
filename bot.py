@@ -594,7 +594,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     user_id = message.from_user.id
     text = message.text
-    
+
+    # ОТЛАДКА - УДАЛИТЬ ПОЗЖЕ
+    print(f"🔍 Получено сообщение: '{text}' от пользователя {user_id}")
+    print(f"🔍 ADMIN_ID = {ADMIN_ID}")
+    print(f"🔍 Пользователь админ? {user_id == ADMIN_ID}")
     # Регистрируем пользователя если новый
     register_user(user_id, message.from_user.username or "Unknown")
     
