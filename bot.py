@@ -124,6 +124,20 @@ def init_database():
         )
     ''')
     
+    # Таблица для заявок на оплату
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS payment_requests (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            amount REAL DEFAULT 100,
+            status TEXT DEFAULT 'pending',
+            receipt_file_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            processed_at TIMESTAMP
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -156,7 +170,107 @@ def create_trial_license(user_id):
         
         if existing:
             conn.close()
-            return None, "У вас уже была пробная лицензия"
+            return None
+
+def create_payment_request(user_id, username):
+    """Создать заявку на оплату"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO payment_requests (user_id, username, amount, status) 
+            VALUES (?, ?, ?, 'pending')
+        ''', (user_id, username, LICENSE_PRICE))
+        request_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return request_id
+    except Exception as e:
+        return None
+
+def update_payment_receipt(request_id, file_id):
+    """Обновить чек для заявки на оплату"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE payment_requests 
+            SET receipt_file_id = ? 
+            WHERE id = ?
+        ''', (file_id, request_id))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        return False
+
+def get_pending_payments():
+    """Получить ожидающие заявки"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, user_id, username, amount, receipt_file_id, created_at 
+            FROM payment_requests 
+            WHERE status = 'pending' AND receipt_file_id IS NOT NULL
+            ORDER BY created_at DESC
+        ''')
+        result = cursor.fetchall()
+        conn.close()
+        return result
+    except Exception as e:
+        return []
+
+def approve_payment(request_id):
+    """Одобрить платеж"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # Получаем данные заявки
+        cursor.execute('SELECT user_id FROM payment_requests WHERE id = ?', (request_id,))
+        result = cursor.fetchone()
+        if not result:
+            conn.close()
+            return False
+        
+        user_id = result[0]
+        
+        # Создаем полную лицензию
+        license_key = create_full_license(user_id)
+        if not license_key:
+            conn.close()
+            return False
+        
+        # Обновляем статус заявки
+        cursor.execute('''
+            UPDATE payment_requests 
+            SET status = 'approved', processed_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        ''', (request_id,))
+        
+        conn.commit()
+        conn.close()
+        return license_key
+        
+    except Exception as e:
+        return False
+
+def reject_payment(request_id):
+    """Отклонить платеж"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE payment_requests 
+            SET status = 'rejected', processed_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        ''', (request_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        return False, "У вас уже была пробная лицензия"
         
         # Создаем новую лицензию
         license_key = generate_license_key()
@@ -174,6 +288,30 @@ def create_trial_license(user_id):
         
     except Exception as e:
         return None, "Ошибка создания лицензии"
+
+        return None, "Ошибка создания лицензии"
+
+def create_full_license(user_id):
+    """Создание полной лицензии"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # Создаем полную лицензию
+        license_key = generate_license_key()
+        
+        cursor.execute('''
+            UPDATE users 
+            SET license_key = ?, license_type = 'full', license_status = 'active', expires_at = NULL
+            WHERE user_id = ?
+        ''', (license_key, user_id))
+        
+        conn.commit()
+        conn.close()
+        return license_key
+        
+    except Exception as e:
+        return None
 
 def get_user_license(user_id):
     """Получить лицензию пользователя"""
@@ -467,23 +605,40 @@ async def handle_buy_license(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
+    user_id = query.from_user.id
+    username = query.from_user.username or "Unknown"
+    
+    # Создаем заявку на оплату
+    request_id = create_payment_request(user_id, username)
+    if not request_id:
+        await query.message.reply_text("❌ Ошибка создания заявки!")
+        return
+    
+    # Сохраняем ID заявки в контексте пользователя
+    context.user_data['payment_request_id'] = request_id
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Я оплатил", callback_data="payment_sent")],
+        [InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")]
+    ]
+    
     await query.message.reply_text(
-        f"💰 **Покупка полной лицензии**\n\n"
-        f"💵 **Стоимость:** ${LICENSE_PRICE}\n"
-        f"♾️ **Срок действия:** Безлимитный\n\n"
-        f"📞 **Для покупки обратитесь:**\n"
-        f"• Telegram: @Zair_Khudayberganov\n"
-        f"• Email: zairxon@gmail.com\n"
-        f"• Канал: @RFx_SIGNAL\n\n"
-        f"💳 **Способы оплаты:**\n"
-        f"• Криптовалюта (BTC, USDT)\n"
-        f"• PayPal\n"
-        f"• Банковская карта\n\n"
-        f"⚡ Лицензия активируется в течение 1 часа после оплаты!",
+        f"💳 **ОПЛАТА ПОЛНОЙ ЛИЦЕНЗИИ**\n\n"
+        f"💵 **Сумма:** ${LICENSE_PRICE}\n\n"
+        f"💳 **РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ:**\n"
+        f"🏦 **Карта VISA:** `4278 3200 2190 9386`\n"
+        f"👤 **Имя:** Zair Khudayberganov\n"
+        f"🏛️ **Банк:** Kapital VISA\n\n"
+        f"📝 **ИНСТРУКЦИЯ:**\n"
+        f"1. Переведите ${LICENSE_PRICE} на указанную карту\n"
+        f"2. Сделайте скриншот чека об оплате\n"
+        f"3. Нажмите кнопку \"✅ Я оплатил\"\n"
+        f"4. Отправьте фото чека\n"
+        f"5. Ожидайте подтверждения (обычно 10-30 минут)\n\n"
+        f"📞 **Вопросы:** @Zair_Khudayberganov\n\n"
+        f"⚠️ **Внимание:** Лицензия активируется только после подтверждения платежа!",
         parse_mode='Markdown',
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 Назад в меню", callback_data="back_to_menu")]
-        ])
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def handle_download_ea(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -541,14 +696,126 @@ async def handle_download_ea(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=get_main_keyboard()
         )
 
+async def handle_payment_sent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кнопки 'Я оплатил'"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.message.reply_text(
+        f"📸 **ОТПРАВЬТЕ ЧЕК ОБ ОПЛАТЕ**\n\n"
+        f"📋 **Пришлите фото или скриншот чека** об оплате ${LICENSE_PRICE}\n\n"
+        f"✅ **Чек должен содержать:**\n"
+        f"• Сумму: ${LICENSE_PRICE}\n"
+        f"• Дату и время операции\n"
+        f"• Номер карты получателя\n\n"
+        f"⏱️ **После отправки чека:**\n"
+        f"• Ваша заявка будет рассмотрена\n"
+        f"• Обработка: 10-30 минут\n"
+        f"• Вы получите уведомление о результате\n\n"
+        f"📞 Вопросы: @Zair_Khudayberganov",
+        parse_mode='Markdown'
+    )
+    
+    # Устанавливаем флаг ожидания чека
+    context.user_data['waiting_for_receipt'] = True
+
 async def handle_back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Возврат в главное меню"""
     query = update.callback_query
     await query.answer()
     await cmd_start(update, context)
 
+async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик фото (чеки об оплате)"""
+    # Проверяем, ожидается ли чек от пользователя
+    if not context.user_data.get('waiting_for_receipt'):
+        return
+    
+    user_id = update.effective_user.id
+    username = update.effective_user.username or "Unknown"
+    request_id = context.user_data.get('payment_request_id')
+    
+    if not request_id:
+        await update.message.reply_text("❌ Ошибка: заявка на оплату не найдена!")
+        return
+    
+    # Получаем файл ID фото
+    photo = update.message.photo[-1]  # Берем фото лучшего качества
+    file_id = photo.file_id
+    
+    # Сохраняем чек в заявку
+    if update_payment_receipt(request_id, file_id):
+        # Отправляем уведомление админу
+        try:
+            admin_keyboard = [
+                [
+                    InlineKeyboardButton("✅ Одобрить", callback_data=f"approve_{request_id}"),
+                    InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{request_id}")
+                ]
+            ]
+            
+            await context.bot.send_photo(
+                chat_id=ADMIN_ID,
+                photo=file_id,
+                caption=f"💳 **НОВАЯ ЗАЯВКА НА ОПЛАТУ**\n\n"
+                        f"👤 **Пользователь:** @{username} (ID: {user_id})\n"
+                        f"💵 **Сумма:** ${LICENSE_PRICE}\n"
+                        f"🆔 **ID заявки:** {request_id}\n\n"
+                        f"📸 **Чек об оплате приложен выше**",
+                parse_mode='Markdown',
+                reply_markup=InlineKeyboardMarkup(admin_keyboard)
+            )
+            
+            # Уведомляем пользователя
+            await update.message.reply_text(
+                f"✅ **ЧЕК ПОЛУЧЕН!**\n\n"
+                f"📸 Ваш чек об оплате отправлен на проверку\n"
+                f"⏱️ **Время обработки:** 10-30 минут\n"
+                f"🔔 Вы получите уведомление о результате\n\n"
+                f"🆔 **Номер заявки:** {request_id}\n\n"
+                f"📞 Вопросы: @Zair_Khudayberganov",
+                parse_mode='Markdown',
+                reply_markup=get_main_keyboard()
+            )
+            
+            # Сбрасываем флаги
+            context.user_data.pop('waiting_for_receipt', None)
+            context.user_data.pop('payment_request_id', None)
+            
+        except Exception as e:
+            await update.message.reply_text(
+                "❌ Ошибка отправки заявки! Попробуйте позже или обратитесь к администратору."
+            )
+    else:
+        await update.message.reply_text("❌ Ошибка сохранения чека!")
+
 # ==============================================
-# ОБРАБОТЧИК CALLBACK ЗАПРОСОВ
+# АДМИНСКИЕ КОМАНДЫ ДЛЯ ПЛАТЕЖЕЙ  
+# ==============================================
+
+async def cmd_payments(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /payments - список ожидающих платежей"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Доступ запрещен!")
+        return
+    
+    payments = get_pending_payments()
+    
+    if not payments:
+        await update.message.reply_text("📋 Нет ожидающих заявок на оплату")
+        return
+    
+    text = "💳 **ОЖИДАЮЩИЕ ЗАЯВКИ:**\n\n"
+    
+    for payment in payments:
+        request_id, user_id, username, amount, file_id, created_at = payment
+        text += f"🆔 **ID:** {request_id}\n"
+        text += f"👤 **Пользователь:** @{username} (ID: {user_id})\n"
+        text += f"💵 **Сумма:** ${amount}\n"
+        text += f"📅 **Дата:** {created_at}\n"
+        text += f"---\n"
+    
+    await update.message.reply_text(text, parse_mode='Markdown')
 # ==============================================
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -633,14 +900,22 @@ def main():
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("upload_ea", cmd_upload_ea))
+    app.add_handler(CommandHandler("payments", cmd_payments))
     
-    # Добавляем обработчики callback'ов и документов
+    # Добавляем обработчики callback'ов, документов и фото
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     
     print("✅ Бот запущен и готов к работе!")
     print(f"👨‍💼 Admin ID: {ADMIN_ID}")
     print("📞 Поддержка: @Zair_Khudayberganov")
+    print("\n📋 ДОСТУПНЫЕ АДМИНСКИЕ КОМАНДЫ:")
+    print("• /stats - статистика бота")
+    print("• /upload_ea - загрузка EA файла")
+    print("• /payments - ожидающие платежи")
+    print("• Одобрение/отклонение платежей через кнопки")
+    print("\n⚠️ ВАЖНО: Обновите реквизиты карты в коде!")
     
     # Запускаем бота
     app.run_polling(drop_pending_updates=True)
