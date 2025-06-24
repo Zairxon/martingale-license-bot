@@ -15,10 +15,6 @@ ADMIN_ID = 295698267  # Ваш РЕАЛЬНЫЙ ID (исправлено!)
 DB_FILE = 'licenses.db'
 LICENSE_PRICE = 100
 
-print(f"🤖 Конфигурация загружена:")
-print(f"📋 Admin ID: {ADMIN_ID}")
-print(f"🔑 Token: {'✅ Установлен' if TOKEN else '❌ Не найден'}")
-
 # ==============================================
 # КОНСТАНТЫ С ТЕКСТАМИ
 # ==============================================
@@ -77,7 +73,10 @@ EA_INSTRUCTION = """
 • Используйте ECN счета с низким спредом
 • Мониторьте первые сделки внимательно
 
-🆘 **ПОДДЕРЖКА:** @YourSupportBot
+🆘 **ПОДДЕРЖКА:**
+• Telegram: @Zair_Khudayberganov
+• Email: zairxon@gmail.com
+• Канал: @RFx_SIGNAL
 """
 
 # ==============================================
@@ -85,36 +84,12 @@ EA_INSTRUCTION = """
 # ==============================================
 
 def is_admin(user_id):
-    """Простая проверка админа с СУПЕРОТЛАДКОЙ"""
-    print(f"=" * 60)
-    print(f"🔍 СУПЕРОТЛАДКА ПРОВЕРКИ АДМИНА:")
-    print(f"📥 Входящий user_id: '{user_id}' (тип: {type(user_id)})")
-    print(f"🎯 Целевой ADMIN_ID: '{ADMIN_ID}' (тип: {type(ADMIN_ID)})")
-    
+    """Проверка админа"""
     try:
         user_id_int = int(user_id)
         admin_id_int = int(ADMIN_ID)
-        
-        print(f"🔢 user_id_int: {user_id_int}")
-        print(f"🔢 admin_id_int: {admin_id_int}")
-        print(f"⚖️ Сравнение: {user_id_int} == {admin_id_int}")
-        
-        result = user_id_int == admin_id_int
-        print(f"🎲 Результат сравнения: {result}")
-        
-        # ПРИНУДИТЕЛЬНАЯ ПРОВЕРКА для известных админских ID
-        if user_id_int in [295698267, 295608267]:  # Ваш реальный ID и старый на всякий случай
-            print(f"🚨 ПРИНУДИТЕЛЬНО: ID {user_id_int} в списке админов!")
-            result = True
-        
-        print(f"✅ ФИНАЛЬНЫЙ РЕЗУЛЬТАТ: {result}")
-        print(f"=" * 60)
-        
-        return result
-        
-    except Exception as e:
-        print(f"❌ ОШИБКА в is_admin: {e}")
-        print(f"=" * 60)
+        return user_id_int == admin_id_int
+    except (ValueError, TypeError):
         return False
 
 # ==============================================
@@ -151,7 +126,6 @@ def init_database():
     
     conn.commit()
     conn.close()
-    print("✅ База данных инициализирована")
 
 def register_user(user_id, username):
     """Регистрация пользователя"""
@@ -163,7 +137,7 @@ def register_user(user_id, username):
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"❌ Ошибка регистрации: {e}")
+        pass  # Тихая обработка ошибок
 
 def generate_license_key():
     """Генерация лицензионного ключа"""
@@ -199,7 +173,6 @@ def create_trial_license(user_id):
         return license_key, None
         
     except Exception as e:
-        print(f"❌ Ошибка создания лицензии: {e}")
         return None, "Ошибка создания лицензии"
 
 def get_user_license(user_id):
@@ -213,7 +186,6 @@ def get_user_license(user_id):
         conn.close()
         return result
     except Exception as e:
-        print(f"❌ Ошибка получения лицензии: {e}")
         return None
 
 def save_ea_file(file_data, filename):
@@ -228,7 +200,6 @@ def save_ea_file(file_data, filename):
         conn.close()
         return True
     except Exception as e:
-        print(f"❌ Ошибка сохранения файла: {e}")
         return False
 
 def get_ea_file():
@@ -241,7 +212,6 @@ def get_ea_file():
         conn.close()
         return result[0] if result else None
     except Exception as e:
-        print(f"❌ Ошибка получения файла: {e}")
         return None
 
 def get_license_stats():
@@ -271,7 +241,6 @@ def get_license_stats():
             'full_licenses': full_licenses
         }
     except Exception as e:
-        print(f"❌ Ошибка статистики: {e}")
         return None
 
 # ==============================================
@@ -322,27 +291,19 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 **📊 Мой статус** - проверить текущую лицензию\n"
         "🔹 **📖 Описание** - детали о торговом советнике\n"
         "🔹 **📖 Инструкция** - руководство по установке\n\n"
-        "📞 **Поддержка:** @YourSupportBot"
+        "📞 **Поддержка:**\n"
+        "• Telegram: @Zair_Khudayberganov\n"
+        "• Email: zairxon@gmail.com\n"
+        "• Канал: @RFx_SIGNAL"
     )
     
     await update.message.reply_text(help_text, parse_mode='Markdown', reply_markup=get_main_keyboard())
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /stats (только для админа)"""
-    user_id = update.effective_user.id
-    username = update.effective_user.username or "Unknown"
-    
-    print(f"🎯 Команда /stats от пользователя:")
-    print(f"   ID: {user_id}")
-    print(f"   Username: {username}")
-    print(f"   Проверяем права админа...")
-    
-    if not is_admin(user_id):
-        print(f"❌ Пользователь {user_id} НЕ АДМИН!")
+    if not is_admin(update.effective_user.id):
         await update.message.reply_text("❌ Доступ запрещен!")
         return
-    
-    print(f"✅ Пользователь {user_id} - АДМИН! Выполняем команду...")
     
     stats = get_license_stats()
     if not stats:
@@ -510,8 +471,10 @@ async def handle_buy_license(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"💰 **Покупка полной лицензии**\n\n"
         f"💵 **Стоимость:** ${LICENSE_PRICE}\n"
         f"♾️ **Срок действия:** Безлимитный\n\n"
-        f"📞 **Для покупки обратитесь к администратору:**\n"
-        f"@YourSupportBot\n\n"
+        f"📞 **Для покупки обратитесь:**\n"
+        f"• Telegram: @Zair_Khudayberganov\n"
+        f"• Email: zairxon@gmail.com\n"
+        f"• Канал: @RFx_SIGNAL\n\n"
         f"💳 **Способы оплаты:**\n"
         f"• Криптовалюта (BTC, USDT)\n"
         f"• PayPal\n"
@@ -573,7 +536,6 @@ async def handle_download_ea(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 reply_markup=get_main_keyboard()
             )
     except Exception as e:
-        print(f"❌ Ошибка отправки файла: {e}")
         await query.message.reply_text(
             "❌ **Ошибка отправки файла!**\n\nПопробуйте позже или обратитесь к администратору.",
             reply_markup=get_main_keyboard()
@@ -593,8 +555,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик callback запросов"""
     query = update.callback_query
     data = query.data
-    
-    print(f"📱 Callback: {data} от пользователя {query.from_user.id}")
     
     if data == "get_trial":
         await handle_get_trial(update, context)
@@ -646,7 +606,6 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Ошибка сохранения файла!")
             
     except Exception as e:
-        print(f"❌ Ошибка загрузки файла: {e}")
         await update.message.reply_text("❌ Ошибка при загрузке файла!")
 
 # ==============================================
@@ -679,15 +638,9 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
     
-    print("✅ Бот запущен!")
+    print("✅ Бот запущен и готов к работе!")
     print(f"👨‍💼 Admin ID: {ADMIN_ID}")
-    print("=" * 50)
-    print("📋 ИНСТРУКЦИЯ ДЛЯ АДМИНИСТРАТОРА:")
-    print("1. Отправьте боту команду /upload_ea")
-    print("2. Отправьте .ex5 файл боту")
-    print("3. Бот автоматически сохранит файл")
-    print("4. Протестируйте команду /stats")
-    print("=" * 50)
+    print("📞 Поддержка: @Zair_Khudayberganov")
     
     # Запускаем бота
     app.run_polling(drop_pending_updates=True)
