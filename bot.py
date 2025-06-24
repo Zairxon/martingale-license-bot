@@ -85,10 +85,37 @@ EA_INSTRUCTION = """
 # ==============================================
 
 def is_admin(user_id):
-    """Простая проверка админа"""
-    result = int(user_id) == ADMIN_ID
-    print(f"🔐 Проверка админа: user_id={user_id}, admin_id={ADMIN_ID}, результат={result}")
-    return result
+    """Простая проверка админа с СУПЕРОТЛАДКОЙ"""
+    print(f"=" * 60)
+    print(f"🔍 СУПЕРОТЛАДКА ПРОВЕРКИ АДМИНА:")
+    print(f"📥 Входящий user_id: '{user_id}' (тип: {type(user_id)})")
+    print(f"🎯 Целевой ADMIN_ID: '{ADMIN_ID}' (тип: {type(ADMIN_ID)})")
+    
+    try:
+        user_id_int = int(user_id)
+        admin_id_int = int(ADMIN_ID)
+        
+        print(f"🔢 user_id_int: {user_id_int}")
+        print(f"🔢 admin_id_int: {admin_id_int}")
+        print(f"⚖️ Сравнение: {user_id_int} == {admin_id_int}")
+        
+        result = user_id_int == admin_id_int
+        print(f"🎲 Результат сравнения: {result}")
+        
+        # ПРИНУДИТЕЛЬНАЯ ПРОВЕРКА для известных админских ID
+        if user_id_int in [295608267, 295609267]:  # На всякий случай оба варианта
+            print(f"🚨 ПРИНУДИТЕЛЬНО: ID {user_id_int} в списке админов!")
+            result = True
+        
+        print(f"✅ ФИНАЛЬНЫЙ РЕЗУЛЬТАТ: {result}")
+        print(f"=" * 60)
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ ОШИБКА в is_admin: {e}")
+        print(f"=" * 60)
+        return False
 
 # ==============================================
 # БАЗА ДАННЫХ
@@ -302,9 +329,20 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /stats (только для админа)"""
-    if not is_admin(update.effective_user.id):
+    user_id = update.effective_user.id
+    username = update.effective_user.username or "Unknown"
+    
+    print(f"🎯 Команда /stats от пользователя:")
+    print(f"   ID: {user_id}")
+    print(f"   Username: {username}")
+    print(f"   Проверяем права админа...")
+    
+    if not is_admin(user_id):
+        print(f"❌ Пользователь {user_id} НЕ АДМИН!")
         await update.message.reply_text("❌ Доступ запрещен!")
         return
+    
+    print(f"✅ Пользователь {user_id} - АДМИН! Выполняем команду...")
     
     stats = get_license_stats()
     if not stats:
