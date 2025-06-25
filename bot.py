@@ -420,11 +420,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     register_user(user.id, user.username or "Unknown")
     
     welcome_text = (
-        "🤖 **Добро пожаловать в Bagdanov Strategy EA License Bot!**\n"
+        "🤖 **Добро пожаловать в Bogdanov Strategy EA License Bot!**\n"
         "🤖 **Bogdanov strategiyasi EA License Bot ga xush kelibsiz!**\n\n"
         "🎯 **Этот бот предоставляет доступ к торговому советнику:**\n"
         "🎯 **Ushbu bot savdo maslahatchiiga kirish imkonini beradi:**\n"
-        "🇷🇺 • Автоматическая торговля по стратегии Багданова\n"
+        "🇷🇺 • Автоматическая торговля по стратегии Богданова\n"
         "🇺🇿 • Bogdanov strategiyasi bo'yicha avtomatik savdo\n"
         "🇷🇺 • Поддержка BTCUSD и XAUUSD\n"
         "🇺🇿 • BTCUSD va XAUUSD qo'llab-quvvatlash\n"
