@@ -268,7 +268,7 @@ def get_stats():
 def main_keyboard():
     keyboard = [
         [InlineKeyboardButton("🆓 1 месяц БЕСПЛАТНО", callback_data="trial")],
-        [InlineKeyboardButton("💰 Купить лицензию $100", callback_data="buy")],
+        [InlineKeyboardButton("💰 Купить лицензию 100 USD", callback_data="buy")],
         [InlineKeyboardButton("📊 Мой статус", callback_data="status")],
         [InlineKeyboardButton("📖 Описание EA", callback_data="info")]
     ]
@@ -278,18 +278,18 @@ def main_keyboard():
 # ТЕКСТЫ
 # ===============================
 
-EA_INFO = """🤖 **ТОРГОВЫЙ СОВЕТНИК**
-**Стратегия Богданова**
+EA_INFO = """🤖 ТОРГОВЫЙ СОВЕТНИК
+Стратегия Богданова
 
-📊 **Символы:** BTCUSD, XAUUSD
-⚡ **VPS оптимизирован**
-🛡️ **Защита от просадок**
-🔄 **Автоматическая торговля**
+📊 Символы: BTCUSD, XAUUSD
+⚡ VPS оптимизирован
+🛡️ Защита от просадок
+🔄 Автоматическая торговля
 
-💰 **Рекомендуемый депозит:** от $1000
+💰 Рекомендуемый депозит: от 1000 USD
 
-📞 **Поддержка:** @rasul_asqarov_rfx
-👥 **Группа:** t.me/RFx_Group"""
+📞 Поддержка: @rasul_asqarov_rfx
+👥 Группа: t.me/RFx_Group"""
 
 # ===============================
 # ОБРАБОТЧИКИ КОМАНД
@@ -300,20 +300,20 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         register_user(user.id, user.username or "Unknown")
         
-        text = """🤖 **Добро пожаловать!**
+        text = """🤖 Добро пожаловать!
 
-🎯 **Автоматическая торговля**
-📊 **Стратегия Богданова**
-⚡ **VPS оптимизация**
+🎯 Автоматическая торговля
+📊 Стратегия Богданова
+⚡ VPS оптимизация
 
-💡 **Опции:**
+💡 Опции:
 🆓 Пробная лицензия - 1 МЕСЯЦ бесплатно
-💰 Полная лицензия - $100 (навсегда)
+💰 Полная лицензия - 100 USD навсегда
 
 📞 @rasul_asqarov_rfx
 👥 t.me/RFx_Group"""
         
-        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=main_keyboard())
+        await update.message.reply_text(text, reply_markup=main_keyboard())
         
     except Exception as e:
         logger.error(f"Ошибка в start: {e}")
@@ -325,16 +325,16 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         stats = get_stats()
-        text = f"""📊 **Статистика**
+        text = f"""📊 Статистика
 
 👥 Пользователей: {stats['total']}
 ✅ Активных: {stats['active']}
 🆓 Пробных: {stats['trial']}
 💰 Полных: {stats['full']}
 
-💵 Доход: ${stats['full'] * LICENSE_PRICE}"""
+💵 Доход: {stats['full'] * LICENSE_PRICE} USD"""
         
-        await update.message.reply_text(text, parse_mode='Markdown')
+        await update.message.reply_text(text)
         
     except Exception as e:
         logger.error(f"Ошибка в stats: {e}")
@@ -356,33 +356,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if error:
                 await query.message.reply_text(f"❌ {error}", reply_markup=main_keyboard())
             else:
-                text = f"""🎉 **Пробная лицензия активирована!**
+                text = f"""🎉 Пробная лицензия активирована!
 
-🔑 **Ваш ключ:** `{key}`
-⏰ **Срок:** 1 МЕСЯЦ (30 дней)
+🔑 Ваш ключ: {key}
+⏰ Срок: 1 МЕСЯЦ (30 дней)
 
 📁 Теперь можете скачать EA"""
                 
                 keyboard = [[InlineKeyboardButton("📁 Скачать EA", callback_data="download")]]
-                await query.message.reply_text(text, parse_mode='Markdown', 
-                                             reply_markup=InlineKeyboardMarkup(keyboard))
+                await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         
         elif data == "buy":
             payment_id = create_payment_request(user_id, query.from_user.username or "Unknown")
             if payment_id:
                 context.user_data['payment_id'] = payment_id
                 
-                text = f"""💳 **ОПЛАТА ЛИЦЕНЗИИ**
+                text = f"""💳 ОПЛАТА ЛИЦЕНЗИИ
 
-💵 **Сумма:** ${LICENSE_PRICE}
+💵 Сумма: {LICENSE_PRICE} USD
 
-💳 **РЕКВИЗИТЫ:**
-🏦 **VISA:** `{VISA_CARD}`
-🏦 **HUMO:** `{HUMO_CARD}`
-👤 **Владелец:** {CARD_OWNER}
+💳 РЕКВИЗИТЫ:
+🏦 VISA: {VISA_CARD}
+🏦 HUMO: {HUMO_CARD}
+👤 Владелец: {CARD_OWNER}
 
-📝 **Инструкция:**
-1. Переведите ${LICENSE_PRICE} на карту
+📝 Инструкция:
+1. Переведите {LICENSE_PRICE} USD на карту
 2. Сделайте скриншот чека
 3. Нажмите "Я оплатил"
 4. Отправьте фото чека
@@ -390,13 +389,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 📞 @rasul_asqarov_rfx"""
                 
                 keyboard = [[InlineKeyboardButton("✅ Я оплатил", callback_data="paid")]]
-                await query.message.reply_text(text, parse_mode='Markdown',
-                                             reply_markup=InlineKeyboardMarkup(keyboard))
+                await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         
         elif data == "paid":
-            await query.message.reply_text(f"""📸 **Отправьте чек**
+            await query.message.reply_text(f"""📸 Отправьте чек
 
-Пришлите фото чека на сумму ${LICENSE_PRICE}
+Пришлите фото чека на сумму {LICENSE_PRICE} USD
 
 ✅ Чек должен содержать:
 • Сумму платежа
@@ -411,7 +409,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             license_data = get_user_license(user_id)
             
             if not license_data or not license_data[0]:
-                text = """❌ **Лицензия не найдена**
+                text = """❌ Лицензия не найдена
 
 Получите пробную или купите полную."""
                 await query.message.reply_text(text, reply_markup=main_keyboard())
@@ -429,26 +427,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 status_emoji = "✅" if status == "active" else "❌"
                 type_emoji = "🆓" if license_type == "trial" else "💰"
                 
-                text = f"""{status_emoji} **Статус лицензии**
+                text = f"""{status_emoji} Статус лицензии
 
-🔑 **Ключ:** `{key}`
-{type_emoji} **Тип:** {license_type.title()}
-📊 **Статус:** {status.title()}"""
+🔑 Ключ: {key}
+{type_emoji} Тип: {license_type.title()}
+📊 Статус: {status.title()}"""
                 
                 if expires and license_type == "trial":
-                    text += f"\n⏰ **Истекает:** {expires[:10]}"
+                    text += f"\n⏰ Истекает: {expires[:10]}"
                 elif license_type == "full":
-                    text += f"\n♾️ **Срок:** Безлимитный"
+                    text += f"\n♾️ Срок: Безлимитный"
                 
                 keyboard = []
                 if status == "active":
                     keyboard.append([InlineKeyboardButton("📁 Скачать EA", callback_data="download")])
                 
-                await query.message.reply_text(text, parse_mode='Markdown',
-                                             reply_markup=InlineKeyboardMarkup(keyboard))
+                await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         
         elif data == "info":
-            await query.message.reply_text(EA_INFO, parse_mode='Markdown', reply_markup=main_keyboard())
+            await query.message.reply_text(EA_INFO, reply_markup=main_keyboard())
         
         elif data == "download":
             license_data = get_user_license(user_id)
@@ -459,19 +456,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             key = license_data[0]
             
-            await query.message.reply_text(f"""📁 **Скачивание EA**
+            await query.message.reply_text(f"""📁 Скачивание EA
 
-🔑 **Ваш ключ:** `{key}`
+🔑 Ваш ключ: {key}
 
-⏳ Отправляю файл...""", parse_mode='Markdown')
+⏳ Отправляю файл...""")
             
             ea_data = get_ea_file()
             if ea_data:
                 await query.message.reply_document(
                     document=ea_data,
                     filename="Bogdanov_Strategy_EA.ex5",
-                    caption=f"🔑 Ключ: `{key}`",
-                    parse_mode='Markdown'
+                    caption=f"🔑 Ключ: {key}"
                 )
             else:
                 await query.message.reply_text("❌ Файл недоступен. Обратитесь к @rasul_asqarov_rfx")
@@ -490,18 +486,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await context.bot.send_message(
                         chat_id=target_user_id,
-                        text=f"""🎉 **ПЛАТЕЖ ПОДТВЕРЖДЕН!**
+                        text=f"""🎉 ПЛАТЕЖ ПОДТВЕРЖДЕН!
 
 ✅ Полная лицензия активирована!
-🔑 **Ключ:** `{license_key}`
-♾️ **Срок:** Безлимитный""",
-                        parse_mode='Markdown'
+🔑 Ключ: {license_key}
+♾️ Срок: Безлимитный"""
                     )
                 except:
                     pass
                 
-                await query.message.edit_text(f"✅ Платеж одобрен\n🔑 Ключ: `{license_key}`", 
-                                            parse_mode='Markdown')
+                await query.message.edit_text(f"✅ Платеж одобрен\n🔑 Ключ: {license_key}")
         
     except Exception as e:
         logger.error(f"Ошибка в button_handler: {e}")
@@ -538,10 +532,10 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_photo(
                     chat_id=ADMIN_ID,
                     photo=file_id,
-                    caption=f"""💳 **НОВАЯ ЗАЯВКА**
+                    caption=f"""💳 НОВАЯ ЗАЯВКА
 
 👤 @{username} (ID: {user_id})
-💵 Сумма: ${LICENSE_PRICE}
+💵 Сумма: {LICENSE_PRICE} USD
 🆔 Заявка: {payment_id}
 
 💳 Реквизиты:
@@ -550,7 +544,7 @@ HUMO: {HUMO_CARD}""",
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 
-                await update.message.reply_text("""✅ **Чек получен!**
+                await update.message.reply_text("""✅ Чек получен!
 
 📸 Отправлен на проверку
 ⏱️ Обработка: 10-30 минут
@@ -588,7 +582,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_data = await file.download_as_bytearray()
         
         if save_ea_file(file_data, update.message.document.file_name):
-            await update.message.reply_text(f"""✅ **Файл загружен!**
+            await update.message.reply_text(f"""✅ Файл загружен!
 
 📁 {update.message.document.file_name}
 📊 {len(file_data)} байт""")
@@ -634,12 +628,22 @@ def main():
     
     print("✅ Бот запущен!")
     print("🆓 Пробная лицензия: 1 МЕСЯЦ")
-    print("💰 Полная лицензия: $100")
+    print("💰 Полная лицензия: 100 USD")
     print("📋 Админские команды: /stats")
     print("🚫 Платежи ТОЛЬКО через бота!")
+    print("⚠️  ВАЖНО: Остановите все другие боты с тем же токеном!")
     
-    # Запуск
-    app.run_polling(drop_pending_updates=True, pool_timeout=20)
+    # Запуск с защитой от конфликтов
+    try:
+        app.run_polling(
+            drop_pending_updates=True,  # Очищаем старые сообщения
+            pool_timeout=30,            # Увеличиваем timeout
+            read_timeout=10,            # Timeout чтения
+            write_timeout=10            # Timeout записи
+        )
+    except Exception as e:
+        logger.error(f"Ошибка запуска: {e}")
+        print("❌ Ошибка запуска! Проверьте что нет других ботов с тем же токеном!")
 
 if __name__ == '__main__':
     main()
