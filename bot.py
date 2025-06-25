@@ -5,6 +5,7 @@ import secrets
 import string
 import logging
 from datetime import datetime, timedelta
+from io import BytesIO
 
 # Настройка логирования
 logging.basicConfig(
@@ -53,7 +54,7 @@ def init_db():
         conn = sqlite3.connect('bot_simple.db')
         c = conn.cursor()
         
-        # Таблица пользователей (обновленная схема)
+        # Таблица пользователей
         c.execute('''CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
@@ -69,7 +70,7 @@ def init_db():
         try:
             c.execute('ALTER TABLE users ADD COLUMN trial_used INTEGER DEFAULT 0')
         except sqlite3.OperationalError:
-            pass  # Колонка уже существует
+            pass
         
         # Таблица платежей
         c.execute('''CREATE TABLE IF NOT EXISTS payments (
@@ -77,17 +78,10 @@ def init_db():
             user_id INTEGER,
             username TEXT,
             amount INTEGER DEFAULT 100,
-            license_months INTEGER DEFAULT 1,
             status TEXT DEFAULT 'pending',
             receipt_file_id TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )''')
-        
-        # Добавляем колонку license_months если её нет
-        try:
-            c.execute('ALTER TABLE payments ADD COLUMN license_months INTEGER DEFAULT 1')
-        except sqlite3.OperationalError:
-            pass
         
         # Таблица EA файлов
         c.execute('''CREATE TABLE IF NOT EXISTS ea_files (
@@ -184,13 +178,13 @@ def create_trial_license(user_id):
         logger.error(f"Ошибка создания пробной лицензии: {e}")
         return None, "Ошибка создания лицензии"
 
-def create_monthly_license(user_id, months=1):
+def create_monthly_license(user_id):
     try:
         conn = sqlite3.connect('bot_simple.db')
         c = conn.cursor()
         
         key = generate_key()
-        expires = (datetime.now() + timedelta(days=30 * months)).isoformat()
+        expires = (datetime.now() + timedelta(days=30)).isoformat()
         
         c.execute('''UPDATE users SET 
             license_key = ?, license_type = 'monthly', license_status = 'active', expires_at = ?
@@ -198,53 +192,18 @@ def create_monthly_license(user_id, months=1):
         
         conn.commit()
         conn.close()
-        return key
+        return key, expires
         
     except Exception as e:
         logger.error(f"Ошибка создания месячной лицензии: {e}")
-        return None
-
-def extend_license(user_id, months=1):
-    """Продлевает существующую лицензию"""
-    try:
-        conn = sqlite3.connect('bot_simple.db')
-        c = conn.cursor()
-        
-        # Получаем текущую лицензию
-        c.execute('SELECT expires_at FROM users WHERE user_id = ?', (user_id,))
-        result = c.fetchone()
-        
-        if result and result[0]:
-            # Продлеваем от текущей даты истечения
-            current_expires = datetime.fromisoformat(result[0])
-            if current_expires > datetime.now():
-                new_expires = current_expires + timedelta(days=30 * months)
-            else:
-                new_expires = datetime.now() + timedelta(days=30 * months)
-        else:
-            # Создаем новую лицензию
-            new_expires = datetime.now() + timedelta(days=30 * months)
-        
-        key = generate_key()
-        c.execute('''UPDATE users SET 
-            license_key = ?, license_type = 'monthly', license_status = 'active', expires_at = ?
-            WHERE user_id = ?''', (key, new_expires.isoformat(), user_id))
-        
-        conn.commit()
-        conn.close()
-        return key, new_expires
-        
-    except Exception as e:
-        logger.error(f"Ошибка продления лицензии: {e}")
         return None, None
 
-def create_payment_request(user_id, username, months=1):
+def create_payment_request(user_id, username):
     try:
         conn = sqlite3.connect('bot_simple.db')
         c = conn.cursor()
-        amount = MONTHLY_PRICE * months
-        c.execute('INSERT INTO payments (user_id, username, amount, license_months) VALUES (?, ?, ?, ?)', 
-                 (user_id, username, amount, months))
+        c.execute('INSERT INTO payments (user_id, username, amount) VALUES (?, ?, ?)', 
+                 (user_id, username, MONTHLY_PRICE))
         payment_id = c.lastrowid
         conn.commit()
         conn.close()
@@ -270,21 +229,21 @@ def approve_payment(payment_id):
         conn = sqlite3.connect('bot_simple.db')
         c = conn.cursor()
         
-        c.execute('SELECT user_id, license_months FROM payments WHERE id = ?', (payment_id,))
+        c.execute('SELECT user_id FROM payments WHERE id = ?', (payment_id,))
         result = c.fetchone()
         if not result:
             conn.close()
             return None
         
-        user_id, months = result
-        license_key, new_expires = extend_license(user_id, months)
+        user_id = result[0]
+        license_key, expires = create_monthly_license(user_id)
         
         if license_key:
             c.execute('UPDATE payments SET status = "approved" WHERE id = ?', (payment_id,))
             conn.commit()
         
         conn.close()
-        return license_key, user_id, new_expires
+        return license_key, user_id, expires
         
     except Exception as e:
         logger.error(f"Ошибка одобрения: {e}")
@@ -294,10 +253,11 @@ def save_ea_file(file_data, filename):
     try:
         conn = sqlite3.connect('bot_simple.db')
         c = conn.cursor()
-        c.execute('DELETE FROM ea_files')
+        c.execute('DELETE FROM ea_files')  # Удаляем старый файл
         c.execute('INSERT INTO ea_files (filename, file_data) VALUES (?, ?)', (filename, file_data))
         conn.commit()
         conn.close()
+        logger.info(f"EA файл сохранен: {filename}, размер: {len(file_data)} байт")
         return True
     except Exception as e:
         logger.error(f"Ошибка сохранения EA: {e}")
@@ -307,13 +267,20 @@ def get_ea_file():
     try:
         conn = sqlite3.connect('bot_simple.db')
         c = conn.cursor()
-        c.execute('SELECT file_data FROM ea_files LIMIT 1')
+        c.execute('SELECT filename, file_data FROM ea_files LIMIT 1')
         result = c.fetchone()
         conn.close()
-        return result[0] if result else None
+        
+        if result:
+            filename, file_data = result
+            logger.info(f"EA файл найден: {filename}, размер: {len(file_data)} байт")
+            return filename, file_data
+        else:
+            logger.warning("EA файл не найден в базе данных")
+            return None, None
     except Exception as e:
         logger.error(f"Ошибка получения EA: {e}")
-        return None
+        return None, None
 
 def get_stats():
     try:
@@ -357,20 +324,9 @@ def get_stats():
 def main_keyboard():
     keyboard = [
         [InlineKeyboardButton("🆓 3 дня БЕСПЛАТНО", callback_data="trial")],
-        [InlineKeyboardButton("💰 1 месяц - 100 USD", callback_data="buy_1")],
-        [InlineKeyboardButton("💎 3 месяца - 270 USD", callback_data="buy_3")],
-        [InlineKeyboardButton("🔥 6 месяцев - 500 USD", callback_data="buy_6")],
+        [InlineKeyboardButton("💰 Купить месяц - 100 USD", callback_data="buy")],
         [InlineKeyboardButton("📊 Мой статус", callback_data="status")],
         [InlineKeyboardButton("📖 Описание EA", callback_data="info")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-def get_buy_keyboard():
-    keyboard = [
-        [InlineKeyboardButton("💰 1 месяц - 100 USD", callback_data="buy_1")],
-        [InlineKeyboardButton("💎 3 месяца - 270 USD (-10%)", callback_data="buy_3")],
-        [InlineKeyboardButton("🔥 6 месяцев - 500 USD (-17%)", callback_data="buy_6")],
-        [InlineKeyboardButton("⬅️ Назад", callback_data="back")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -386,9 +342,8 @@ EA_INFO = """🤖 ТОРГОВЫЙ СОВЕТНИК
 🔄 Автоматическая торговля
 💰 Рекомендуемый депозит: от 1000 USD
 
-🆓 Пробный период: 3 дня
+🆓 Пробный период: 3 дня бесплатно
 💰 Месячная подписка: 100 USD
-💎 Скидки при покупке на несколько месяцев
 
 📞 Поддержка: @rasul_asqarov_rfx
 👥 Группа: t.me/RFx_Group"""
@@ -399,10 +354,9 @@ WELCOME_TEXT = """🤖 Добро пожаловать в RFX Trading!
 📊 Стратегия Богданова
 ⚡ VPS оптимизация
 
-💡 Варианты подписки:
+💡 Варианты:
 🆓 Пробный период - 3 дня бесплатно
 💰 Месячная подписка - 100 USD
-💎 Скидки при покупке на несколько месяцев
 
 📞 Поддержка: @rasul_asqarov_rfx
 👥 Группа: t.me/RFx_Group"""
@@ -427,6 +381,11 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         stats = get_stats()
+        
+        # Проверяем наличие EA файла
+        filename, file_data = get_ea_file()
+        ea_status = f"✅ Загружен: {filename}" if filename else "❌ Не загружен"
+        
         text = f"""📊 Статистика бота
 
 👥 Всего пользователей: {stats['total']}
@@ -435,6 +394,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💰 Месячных: {stats['monthly']}
 💵 Доход: {stats['revenue']} USD
 
+📁 EA файл: {ea_status}
 ⚡ Цена за месяц: {MONTHLY_PRICE} USD
 🆓 Пробный период: {TRIAL_DAYS} дня"""
         
@@ -465,30 +425,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ⏰ Срок: {TRIAL_DAYS} дня
 📁 Теперь можете скачать EA
 
-После окончания пробного периода вы можете купить месячную подписку."""
+После окончания пробного периода вы можете купить месячную подписку за 100 USD."""
                 
                 keyboard = [[InlineKeyboardButton("📁 Скачать EA", callback_data="download")]]
                 await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
         
-        elif data.startswith("buy_"):
-            months = int(data.split("_")[1])
-            prices = {1: 100, 3: 270, 6: 500}  # Скидки для длительных подписок
-            amount = prices.get(months, MONTHLY_PRICE * months)
-            
-            payment_id = create_payment_request(user_id, query.from_user.username or "Unknown", months)
+        elif data == "buy":
+            payment_id = create_payment_request(user_id, query.from_user.username or "Unknown")
             if payment_id:
                 context.user_data['payment_id'] = payment_id
                 
-                months_text = "месяц" if months == 1 else f"{months} месяца" if months < 5 else f"{months} месяцев"
-                savings = ""
-                if months > 1:
-                    regular_price = MONTHLY_PRICE * months
-                    savings = f"\n💰 Экономия: {regular_price - amount} USD"
-                
                 text = f"""💳 ОПЛАТА ЛИЦЕНЗИИ
 
-📦 Пакет: {months_text}
-💵 Сумма: {amount} USD{savings}
+💵 Сумма: {MONTHLY_PRICE} USD (1 месяц)
 
 💳 РЕКВИЗИТЫ:
 🏦 VISA: `{VISA_CARD}`
@@ -496,7 +445,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 👤 Владелец: {CARD_OWNER}
 
 📝 Инструкция:
-1. Переведите {amount} USD на любую карту
+1. Переведите {MONTHLY_PRICE} USD на любую карту
 2. Сделайте скриншот чека
 3. Нажмите "Я оплатил"
 4. Отправьте фото чека
@@ -520,7 +469,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Пришлите фото чека как обычное сообщение.
 
 ✅ Чек должен содержать:
-• Сумму платежа в USD
+• Сумму платежа {MONTHLY_PRICE} USD
 • Дату и время перевода
 • Номер карты получателя
 
@@ -537,7 +486,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Вы можете:
 🆓 Получить пробную лицензию на 3 дня
-💰 Купить месячную подписку"""
+💰 Купить месячную подписку за 100 USD"""
                 await query.message.reply_text(text, reply_markup=main_keyboard())
             else:
                 key, license_type, status, expires, trial_used = license_data
@@ -565,19 +514,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if status == "active":
                     keyboard.append([InlineKeyboardButton("📁 Скачать EA", callback_data="download")])
                 if license_type == "trial" or status == "expired":
-                    keyboard.append([InlineKeyboardButton("💰 Купить подписку", callback_data="buy_options")])
+                    keyboard.append([InlineKeyboardButton("💰 Купить подписку", callback_data="buy")])
                 
                 await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-        
-        elif data == "buy_options":
-            text = """💰 Выберите пакет подписки:
-
-💰 1 месяц - 100 USD
-💎 3 месяца - 270 USD (скидка 10%)
-🔥 6 месяцев - 500 USD (скидка 17%)
-
-Чем больше пакет - тем больше экономия!"""
-            await query.message.reply_text(text, reply_markup=get_buy_keyboard())
         
         elif data == "info":
             await query.message.reply_text(EA_INFO, reply_markup=main_keyboard())
@@ -604,12 +543,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🔑 Ваш ключ: `{key}`
 ⏳ Отправляю файл...""", parse_mode='Markdown')
             
-            ea_data = get_ea_file()
-            if ea_data:
-                await query.message.reply_document(
-                    document=ea_data,
-                    filename="Bogdanov_Strategy_EA.ex5",
-                    caption=f"""🤖 Торговый советник загружен!
+            # Получаем файл из базы данных
+            filename, file_data = get_ea_file()
+            
+            if filename and file_data:
+                try:
+                    # Создаем BytesIO объект из данных
+                    file_obj = BytesIO(file_data)
+                    file_obj.name = filename
+                    
+                    await query.message.reply_document(
+                        document=file_obj,
+                        filename=filename,
+                        caption=f"""🤖 Торговый советник загружен!
 
 🔑 Лицензионный ключ: `{key}`
 📊 Стратегия: Богданова
@@ -617,10 +563,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📞 Поддержка: @rasul_asqarov_rfx
 👥 Группа: t.me/RFx_Group""",
-                    parse_mode='Markdown'
-                )
+                        parse_mode='Markdown'
+                    )
+                    
+                    logger.info(f"Файл успешно отправлен пользователю {user_id}")
+                    
+                except Exception as e:
+                    logger.error(f"Ошибка отправки файла: {e}")
+                    await query.message.reply_text("❌ Ошибка при отправке файла. Обратитесь к @rasul_asqarov_rfx")
             else:
-                await query.message.reply_text("❌ Файл временно недоступен. Обратитесь к @rasul_asqarov_rfx")
+                await query.message.reply_text("❌ Файл EA не найден. Обратитесь к @rasul_asqarov_rfx")
         
         elif data.startswith("approve_"):
             if not is_admin(user_id):
@@ -634,16 +586,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 # Уведомляем пользователя
                 try:
+                    keyboard = [[InlineKeyboardButton("📁 Скачать EA", callback_data="download")]]
+                    
                     await context.bot.send_message(
                         chat_id=target_user_id,
                         text=f"""🎉 ПЛАТЕЖ ПОДТВЕРЖДЕН!
 
 ✅ Месячная лицензия активирована!
 🔑 Ключ: `{license_key}`
-⏰ Действует до: {format_datetime(expires.isoformat())}
+⏰ Действует до: {format_datetime(expires)}
 
 📁 Теперь можете скачать EA!""",
-                        parse_mode='Markdown'
+                        parse_mode='Markdown',
+                        reply_markup=InlineKeyboardMarkup(keyboard)
                     )
                 except Exception as e:
                     logger.error(f"Не удалось отправить уведомление пользователю: {e}")
@@ -652,14 +607,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🔑 Ключ: `{license_key}`
 👤 Пользователь уведомлен
-⏰ Лицензия до: {format_datetime(expires.isoformat())}""", parse_mode='Markdown')
+⏰ Лицензия до: {format_datetime(expires)}""", parse_mode='Markdown')
         
         elif data.startswith("reject_"):
             if not is_admin(user_id):
                 return
             
             payment_id = int(data.split("_")[1])
-            # Здесь можно добавить логику отклонения платежа
             await query.message.edit_text("❌ Платеж отклонен")
         
     except Exception as e:
@@ -687,19 +641,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Сохраняем чек
         if save_receipt(payment_id, file_id):
-            # Получаем данные о платеже
-            try:
-                conn = sqlite3.connect('bot_simple.db')
-                c = conn.cursor()
-                c.execute('SELECT amount, license_months FROM payments WHERE id = ?', (payment_id,))
-                payment_data = c.fetchone()
-                conn.close()
-                
-                amount, months = payment_data if payment_data else (MONTHLY_PRICE, 1)
-                months_text = "месяц" if months == 1 else f"{months} месяца" if months < 5 else f"{months} месяцев"
-            except:
-                amount, months, months_text = MONTHLY_PRICE, 1, "месяц"
-            
             # Отправляем админу
             try:
                 keyboard = [[
@@ -713,8 +654,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     caption=f"""💳 НОВАЯ ЗАЯВКА НА ОПЛАТУ
 
 👤 Пользователь: @{username} (ID: {user_id})
-📦 Пакет: {months_text}
-💵 Сумма: {amount} USD
+💵 Сумма: {MONTHLY_PRICE} USD (1 месяц)
 🆔 Заявка №{payment_id}
 
 💳 Реквизиты для проверки:
@@ -755,15 +695,19 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Можно загружать только файлы .ex5!")
             return
         
+        await update.message.reply_text("⏳ Загружаю файл...")
+        
         file = await update.message.document.get_file()
         file_data = await file.download_as_bytearray()
         
         if save_ea_file(file_data, update.message.document.file_name):
-            await update.message.reply_text(f"""✅ EA файл успешно загружен!
+            await update.message.reply_text(f"""✅ EA файл успешно загружен и готов к раздаче!
 
 📁 Имя файла: {update.message.document.file_name}
 📊 Размер: {len(file_data):,} байт
-🔄 Файл заменен и готов к раздаче""")
+🔄 Старый файл заменен
+
+Теперь пользователи смогут скачивать обновленный файл.""")
         else:
             await update.message.reply_text("❌ Ошибка при загрузке файла!")
             
@@ -792,7 +736,7 @@ def main():
     # Инициализация базы данных
     init_db()
     
-    # Создание приложения с обновленными настройками
+    # Создание приложения
     app = Application.builder().token(TOKEN).build()
     
     # Добавление обработчиков
@@ -810,13 +754,13 @@ def main():
     print("🔧 КОНФИГУРАЦИЯ:")
     print(f"🆓 Пробный период: {TRIAL_DAYS} дня")
     print(f"💰 Цена за месяц: {MONTHLY_PRICE} USD")
-    print(f"💎 Скидки: 3 мес. = 270$, 6 мес. = 500$")
     print(f"👨‍💼 Админ ID: {ADMIN_ID}")
     print("=" * 50)
     print("📋 ДОСТУПНЫЕ КОМАНДЫ:")
     print("/start - Главное меню")
     print("/stats - Статистика (только админ)")
     print("=" * 50)
+    print("📁 Для загрузки EA файла отправьте .ex5 файл боту от имени админа")
     print("⚡ Бот готов к работе!")
     
     # Запуск с оптимизированными настройками
@@ -831,10 +775,6 @@ def main():
     except Exception as e:
         logger.error(f"Критическая ошибка при запуске: {e}")
         print("❌ Не удалось запустить бота!")
-        print("Проверьте:")
-        print("1. Правильность токена")
-        print("2. Интернет соединение") 
-        print("3. Что нет других экземпляров бота")
 
 if __name__ == '__main__':
     main()
