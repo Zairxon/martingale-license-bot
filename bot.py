@@ -4,8 +4,12 @@ import sqlite3
 import secrets
 import string
 import logging
+import hashlib
+import time
 from datetime import datetime, timedelta
 from io import BytesIO
+from flask import Flask, request, jsonify
+from threading import Thread
 
 # Настройка логирования
 logging.basicConfig(
@@ -22,8 +26,8 @@ try:
     from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
     from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 except ImportError:
-    print("❌ Ошибка: установите python-telegram-bot")
-    print("pip install python-telegram-bot")
+    print("❌ Ошибка: установите python-telegram-bot и flask")
+    print("pip install python-telegram-bot flask")
     exit(1)
 
 # ===============================
@@ -31,46 +35,54 @@ except ImportError:
 # ===============================
 TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_ID = 295698267
-MONTHLY_PRICE = 100  # 100$ за месяц
-TRIAL_DAYS = 3       # 3 дня пробный период
+MONTHLY_PRICE = 100
+TRIAL_DAYS = 3
+API_SECRET = "RFX_SECRET_2025"  # Секретный ключ для API
+API_PORT = int(os.getenv('PORT', 5000))  # Порт для Railway
 
 # Банковские реквизиты
 VISA_CARD = "4278 3100 2430 7167"
 HUMO_CARD = "9860 1001 2541 9018"
 CARD_OWNER = "Asqarov Rasulbek"
 
-print("🚀 Запуск бота...")
+print("🚀 Запуск защищенного бота...")
 print(f"👨‍💼 Admin ID: {ADMIN_ID}")
 print(f"💰 Цена за месяц: {MONTHLY_PRICE} USD")
 print(f"🆓 Пробный период: {TRIAL_DAYS} дня")
-print(f"💳 VISA: {VISA_CARD}")
-print(f"💳 HUMO: {HUMO_CARD}")
+print(f"🔗 API порт: {API_PORT}")
 
 # ===============================
 # БАЗА ДАННЫХ
 # ===============================
 def init_db():
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
         
-        # Таблица пользователей
+        # Таблица пользователей (ФИКСИРОВАННЫЕ КЛЮЧИ)
         c.execute('''CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
-            license_key TEXT,
+            license_key TEXT UNIQUE,
             license_type TEXT DEFAULT 'none',
             license_status TEXT DEFAULT 'inactive',
             expires_at TEXT,
+            bound_account TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            trial_used INTEGER DEFAULT 0
+            trial_used INTEGER DEFAULT 0,
+            key_generated INTEGER DEFAULT 0
         )''')
         
-        # Добавляем колонку trial_used если её нет
-        try:
-            c.execute('ALTER TABLE users ADD COLUMN trial_used INTEGER DEFAULT 0')
-        except sqlite3.OperationalError:
-            pass
+        # Таблица активности лицензий (для защиты от перепродажи)
+        c.execute('''CREATE TABLE IF NOT EXISTS license_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            license_key TEXT,
+            account_number TEXT,
+            ip_address TEXT,
+            last_check TEXT DEFAULT CURRENT_TIMESTAMP,
+            check_count INTEGER DEFAULT 1,
+            UNIQUE(license_key, account_number)
+        )''')
         
         # Таблица платежей
         c.execute('''CREATE TABLE IF NOT EXISTS payments (
@@ -90,24 +102,45 @@ def init_db():
             file_data BLOB
         )''')
         
+        # Таблица логов API
+        c.execute('''CREATE TABLE IF NOT EXISTS api_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            license_key TEXT,
+            account_number TEXT,
+            action TEXT,
+            result TEXT,
+            ip_address TEXT,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
         conn.commit()
         conn.close()
-        print("✅ База данных инициализирована")
+        print("✅ Защищенная база данных инициализирована")
         
     except Exception as e:
         logger.error(f"Ошибка БД: {e}")
 
 # ===============================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# БЕЗОПАСНЫЕ ФУНКЦИИ
 # ===============================
-def generate_key():
-    return ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(16))
+def generate_permanent_key(user_id):
+    """Генерирует ПОСТОЯННЫЙ ключ для пользователя"""
+    # Создаем уникальный ключ на основе user_id
+    secret_data = f"{user_id}_{API_SECRET}_PERMANENT"
+    hash_key = hashlib.sha256(secret_data.encode()).hexdigest()[:16].upper()
+    
+    # Формат ключа: RFX-XXXXX-XXXXX-XXXXX
+    key = f"RFX-{hash_key[:4]}-{hash_key[4:8]}-{hash_key[8:12]}-{hash_key[12:16]}"
+    return key
+
+def validate_license_key(license_key):
+    """Проверяет формат ключа"""
+    return license_key.startswith("RFX-") and len(license_key) == 24
 
 def is_admin(user_id):
     return int(user_id) == ADMIN_ID
 
 def check_license_expired(expires_at):
-    """Проверяет истекла ли лицензия"""
     if not expires_at:
         return False
     try:
@@ -116,7 +149,6 @@ def check_license_expired(expires_at):
         return True
 
 def format_datetime(dt_string):
-    """Форматирует дату для отображения"""
     try:
         dt = datetime.fromisoformat(dt_string)
         return dt.strftime("%d.%m.%Y %H:%M")
@@ -128,7 +160,7 @@ def format_datetime(dt_string):
 # ===============================
 def register_user(user_id, username):
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
         c.execute('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', (user_id, username))
         conn.commit()
@@ -136,11 +168,39 @@ def register_user(user_id, username):
     except Exception as e:
         logger.error(f"Ошибка регистрации: {e}")
 
+def get_or_create_user_key(user_id):
+    """Получает постоянный ключ пользователя или создает новый"""
+    try:
+        conn = sqlite3.connect('bot_secure.db')
+        c = conn.cursor()
+        
+        # Проверяем есть ли уже ключ
+        c.execute('SELECT license_key FROM users WHERE user_id = ? AND license_key IS NOT NULL', (user_id,))
+        result = c.fetchone()
+        
+        if result:
+            key = result[0]
+            logger.info(f"Найден существующий ключ для пользователя {user_id}")
+        else:
+            # Создаем постоянный ключ
+            key = generate_permanent_key(user_id)
+            c.execute('UPDATE users SET license_key = ?, key_generated = 1 WHERE user_id = ?', (key, user_id))
+            logger.info(f"Создан новый постоянный ключ для пользователя {user_id}: {key}")
+        
+        conn.commit()
+        conn.close()
+        return key
+        
+    except Exception as e:
+        logger.error(f"Ошибка получения/создания ключа: {e}")
+        return None
+
 def get_user_license(user_id):
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
-        c.execute('SELECT license_key, license_type, license_status, expires_at, trial_used FROM users WHERE user_id = ?', (user_id,))
+        c.execute('''SELECT license_key, license_type, license_status, expires_at, trial_used, 
+                    bound_account FROM users WHERE user_id = ?''', (user_id,))
         result = c.fetchone()
         conn.close()
         return result
@@ -150,7 +210,7 @@ def get_user_license(user_id):
 
 def create_trial_license(user_id):
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
         
         # Проверяем использовался ли пробный период
@@ -161,17 +221,24 @@ def create_trial_license(user_id):
             conn.close()
             return None, "Вы уже использовали пробный период"
         
-        # Создаем пробную лицензию на 3 дня
-        key = generate_key()
+        # Получаем постоянный ключ пользователя
+        key = get_or_create_user_key(user_id)
+        if not key:
+            conn.close()
+            return None, "Ошибка создания ключа"
+        
+        # Активируем пробную лицензию
         expires = (datetime.now() + timedelta(days=TRIAL_DAYS)).isoformat()
         
         c.execute('''UPDATE users SET 
-            license_key = ?, license_type = 'trial', license_status = 'active', 
-            expires_at = ?, trial_used = 1
-            WHERE user_id = ?''', (key, expires, user_id))
+            license_type = 'trial', license_status = 'active', 
+            expires_at = ?, trial_used = 1, bound_account = NULL
+            WHERE user_id = ?''', (expires, user_id))
         
         conn.commit()
         conn.close()
+        
+        logger.info(f"Создана пробная лицензия для пользователя {user_id}: {key}")
         return key, None
         
     except Exception as e:
@@ -180,18 +247,27 @@ def create_trial_license(user_id):
 
 def create_monthly_license(user_id):
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
         
-        key = generate_key()
+        # Получаем постоянный ключ пользователя
+        key = get_or_create_user_key(user_id)
+        if not key:
+            conn.close()
+            return None, None
+        
+        # Активируем месячную лицензию
         expires = (datetime.now() + timedelta(days=30)).isoformat()
         
         c.execute('''UPDATE users SET 
-            license_key = ?, license_type = 'monthly', license_status = 'active', expires_at = ?
-            WHERE user_id = ?''', (key, expires, user_id))
+            license_type = 'monthly', license_status = 'active', 
+            expires_at = ?, bound_account = NULL
+            WHERE user_id = ?''', (expires, user_id))
         
         conn.commit()
         conn.close()
+        
+        logger.info(f"Создана месячная лицензия для пользователя {user_id}: {key}")
         return key, expires
         
     except Exception as e:
@@ -200,7 +276,7 @@ def create_monthly_license(user_id):
 
 def create_payment_request(user_id, username):
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
         c.execute('INSERT INTO payments (user_id, username, amount) VALUES (?, ?, ?)', 
                  (user_id, username, MONTHLY_PRICE))
@@ -214,7 +290,7 @@ def create_payment_request(user_id, username):
 
 def save_receipt(payment_id, file_id):
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
         c.execute('UPDATE payments SET receipt_file_id = ? WHERE id = ?', (file_id, payment_id))
         conn.commit()
@@ -226,7 +302,7 @@ def save_receipt(payment_id, file_id):
 
 def approve_payment(payment_id):
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
         
         c.execute('SELECT user_id FROM payments WHERE id = ?', (payment_id,))
@@ -251,9 +327,9 @@ def approve_payment(payment_id):
 
 def save_ea_file(file_data, filename):
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
-        c.execute('DELETE FROM ea_files')  # Удаляем старый файл
+        c.execute('DELETE FROM ea_files')
         c.execute('INSERT INTO ea_files (filename, file_data) VALUES (?, ?)', (filename, file_data))
         conn.commit()
         conn.close()
@@ -265,7 +341,7 @@ def save_ea_file(file_data, filename):
 
 def get_ea_file():
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
         c.execute('SELECT filename, file_data FROM ea_files LIMIT 1')
         result = c.fetchone()
@@ -274,30 +350,138 @@ def get_ea_file():
         if result:
             filename, file_data = result
             logger.info(f"EA файл найден: {filename}, размер: {len(file_data)} байт")
-            
-            # Дополнительная проверка данных
             if not file_data or len(file_data) == 0:
                 logger.error("EA файл пуст!")
                 return None, None
-                
             return filename, file_data
         else:
             logger.warning("EA файл не найден в базе данных")
             return None, None
-            
     except Exception as e:
         logger.error(f"Ошибка получения EA: {e}")
         return None, None
 
+# ===============================
+# API ДЛЯ ПРОВЕРКИ ЛИЦЕНЗИЙ
+# ===============================
+app = Flask(__name__)
+
+@app.route('/check_license', methods=['GET', 'POST'])
+def check_license():
+    """API endpoint для проверки лицензий советником"""
+    try:
+        # Получаем параметры
+        license_key = request.args.get('key') or request.form.get('key')
+        account_number = request.args.get('account') or request.form.get('account')
+        ip_address = request.remote_addr
+        
+        logger.info(f"Проверка лицензии: key={license_key}, account={account_number}, ip={ip_address}")
+        
+        if not license_key:
+            return jsonify({"valid": False, "error": "Ключ не указан"}), 400
+        
+        if not account_number:
+            return jsonify({"valid": False, "error": "Номер счета не указан"}), 400
+        
+        # Проверяем формат ключа
+        if not validate_license_key(license_key):
+            log_api_activity(license_key, account_number, "check", "invalid_format", ip_address)
+            return jsonify({"valid": False, "error": "Неверный формат ключа"}), 400
+        
+        # Проверяем ключ в базе данных
+        conn = sqlite3.connect('bot_secure.db')
+        c = conn.cursor()
+        
+        c.execute('''SELECT user_id, license_status, expires_at, bound_account, license_type 
+                    FROM users WHERE license_key = ?''', (license_key,))
+        result = c.fetchone()
+        
+        if not result:
+            conn.close()
+            log_api_activity(license_key, account_number, "check", "key_not_found", ip_address)
+            return jsonify({"valid": False, "error": "Ключ не найден"}), 404
+        
+        user_id, status, expires_at, bound_account, license_type = result
+        
+        # Проверяем статус лицензии
+        if status != 'active':
+            conn.close()
+            log_api_activity(license_key, account_number, "check", "inactive", ip_address)
+            return jsonify({"valid": False, "error": "Лицензия неактивна"}), 403
+        
+        # Проверяем истечение
+        if expires_at and check_license_expired(expires_at):
+            # Деактивируем истекшую лицензию
+            c.execute('UPDATE users SET license_status = "expired" WHERE user_id = ?', (user_id,))
+            conn.commit()
+            conn.close()
+            log_api_activity(license_key, account_number, "check", "expired", ip_address)
+            return jsonify({"valid": False, "error": "Лицензия истекла"}), 403
+        
+        # Проверяем привязку к счету
+        if bound_account is None:
+            # Первое использование - привязываем к счету
+            c.execute('UPDATE users SET bound_account = ? WHERE user_id = ?', (account_number, user_id))
+            logger.info(f"Ключ {license_key} привязан к счету {account_number}")
+        elif bound_account != account_number:
+            # Ключ уже привязан к другому счету
+            conn.close()
+            log_api_activity(license_key, account_number, "check", "wrong_account", ip_address)
+            return jsonify({"valid": False, "error": f"Ключ привязан к другому счету"}), 403
+        
+        # Обновляем активность
+        c.execute('''INSERT OR REPLACE INTO license_activity 
+                    (license_key, account_number, ip_address, last_check, check_count) 
+                    VALUES (?, ?, ?, ?, 
+                           COALESCE((SELECT check_count FROM license_activity 
+                                   WHERE license_key = ? AND account_number = ?), 0) + 1)''',
+                 (license_key, account_number, ip_address, datetime.now().isoformat(),
+                  license_key, account_number))
+        
+        conn.commit()
+        conn.close()
+        
+        log_api_activity(license_key, account_number, "check", "success", ip_address)
+        
+        return jsonify({
+            "valid": True,
+            "license_type": license_type,
+            "expires_at": expires_at,
+            "account_number": account_number,
+            "status": "active"
+        })
+        
+    except Exception as e:
+        logger.error(f"Ошибка API проверки лицензии: {e}")
+        return jsonify({"valid": False, "error": "Внутренняя ошибка сервера"}), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Проверка здоровья API"""
+    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
+
+def log_api_activity(license_key, account_number, action, result, ip_address):
+    """Логирование активности API"""
+    try:
+        conn = sqlite3.connect('bot_secure.db')
+        c = conn.cursor()
+        c.execute('''INSERT INTO api_logs 
+                    (license_key, account_number, action, result, ip_address) 
+                    VALUES (?, ?, ?, ?, ?)''',
+                 (license_key, account_number, action, result, ip_address))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Ошибка логирования API: {e}")
+
 def get_stats():
     try:
-        conn = sqlite3.connect('bot_simple.db')
+        conn = sqlite3.connect('bot_secure.db')
         c = conn.cursor()
         
         c.execute('SELECT COUNT(*) FROM users')
         total_users = c.fetchone()[0]
         
-        # Активные лицензии (не истекшие)
         c.execute('''SELECT COUNT(*) FROM users 
                     WHERE license_status = "active" 
                     AND (expires_at IS NULL OR expires_at > datetime('now'))''')
@@ -312,18 +496,23 @@ def get_stats():
         c.execute('SELECT COUNT(*) FROM payments WHERE status = "approved"')
         approved_payments = c.fetchone()[0]
         
+        # Статистика API
+        c.execute('SELECT COUNT(*) FROM api_logs WHERE action = "check" AND result = "success"')
+        successful_checks = c.fetchone()[0]
+        
         conn.close()
         return {
             'total': total_users, 
             'active': active, 
             'trial': trial, 
             'monthly': monthly,
-            'revenue': approved_payments * MONTHLY_PRICE
+            'revenue': approved_payments * MONTHLY_PRICE,
+            'api_checks': successful_checks
         }
         
     except Exception as e:
         logger.error(f"Ошибка статистики: {e}")
-        return {'total': 0, 'active': 0, 'trial': 0, 'monthly': 0, 'revenue': 0}
+        return {'total': 0, 'active': 0, 'trial': 0, 'monthly': 0, 'revenue': 0, 'api_checks': 0}
 
 # ===============================
 # КЛАВИАТУРЫ
@@ -354,10 +543,10 @@ EA_INFO = """🤖 ТОРГОВЫЙ СОВЕТНИК
 📈 Тестируйте на демо или реальном счете
 💰 Месячная подписка: 100 USD (после тестирования)
 
-✅ Преимущества пробного периода:
-• Полный доступ к EA файлу
-• Тестирование всех функций
-• Оценка результатов без риска
+🔐 Система защиты:
+• Уникальный ключ для каждого пользователя
+• Привязка ключа к торговому счету
+• Защита от перепродажи лицензий
 
 📞 Поддержка: @rasul_asqarov_rfx
 👥 Группа: t.me/RFx_Group"""
@@ -367,15 +556,17 @@ WELCOME_TEXT = """🤖 Добро пожаловать в RFX Trading!
 🎯 Автоматическая торговля
 📊 Стратегия Богданова
 ⚡ VPS оптимизация
+🔐 Защищенная лицензионная система
 
 💡 Варианты:
-🆓 Пробный период - 3 дня бесплатно + файл EA
+🆓 Пробный период - 3 дня бесплатно + EA файл
 💰 Месячная подписка - 100 USD
 
 🎯 Логика работы:
 1. Берете пробную лицензию на 3 дня
 2. Скачиваете и тестируете EA
 3. Если понравится - покупаете подписку
+4. Ключ привязывается к вашему торговому счету
 
 📞 Поддержка: @rasul_asqarov_rfx
 👥 Группа: t.me/RFx_Group"""
@@ -405,7 +596,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filename, file_data = get_ea_file()
         ea_status = f"✅ Загружен: {filename}" if filename else "❌ Не загружен"
         
-        text = f"""📊 Статистика бота
+        text = f"""📊 Статистика защищенного бота
 
 👥 Всего пользователей: {stats['total']}
 ✅ Активных лицензий: {stats['active']}
@@ -414,8 +605,15 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💵 Доход: {stats['revenue']} USD
 
 📁 EA файл: {ea_status}
+🔗 API проверок: {stats['api_checks']}
 ⚡ Цена за месяц: {MONTHLY_PRICE} USD
 🆓 Пробный период: {TRIAL_DAYS} дня
+
+🔐 СИСТЕМА ЗАЩИТЫ:
+• Постоянные ключи пользователей
+• Привязка к торговому счету
+• API для проверки лицензий
+• Логирование всех проверок
 
 💡 Для загрузки EA файла отправьте .ex5 файл боту"""
         
@@ -459,15 +657,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 text = f"""🎉 Пробная лицензия активирована!
 
-🔑 Ваш ключ: `{key}`
+🔑 Ваш ПОСТОЯННЫЙ ключ: `{key}`
 ⏰ Срок: {TRIAL_DAYS} дня
 📁 Можете СРАЗУ скачать и тестировать EA!
+
+🔐 ВАЖНО:
+• Ключ будет привязан к вашему торговому счету
+• Один ключ = один торговый счет
+• После тестирования тот же ключ продлевается
 
 🎯 Как тестировать:
 1. Скачайте EA файл
 2. Установите на MT4/MT5  
-3. Тестируйте 3 дня
-4. Если понравится - купите подписку
+3. Введите ключ в настройки EA
+4. Тестируйте 3 дня
+5. Если понравится - купите подписку
 
 💰 После тестирования: месячная подписка 100 USD"""
                 
@@ -479,9 +683,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if payment_id:
                 context.user_data['payment_id'] = payment_id
                 
+                # Показываем текущий ключ пользователя
+                user_key = get_or_create_user_key(user_id)
+                
                 text = f"""💳 ОПЛАТА ЛИЦЕНЗИИ
 
 💵 Сумма: {MONTHLY_PRICE} USD (1 месяц)
+🔑 Ваш ключ: `{user_key}`
 
 💳 РЕКВИЗИТЫ:
 🏦 VISA: `{VISA_CARD}`
@@ -493,6 +701,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 2. Сделайте скриншот чека
 3. Нажмите "Я оплатил"
 4. Отправьте фото чека
+
+🔐 После оплаты тот же ключ будет продлен на месяц!
 
 📞 Поддержка: @rasul_asqarov_rfx"""
                 
@@ -518,7 +728,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Номер карты получателя
 
 ⏱️ Время обработки: 10-30 минут
-🔔 Вы получите уведомление о результате""")
+🔔 Вы получите уведомление о результате
+🔐 Ваш ключ будет продлен автоматически""")
             
             context.user_data['waiting_receipt'] = True
         
@@ -533,7 +744,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💰 Купить месячную подписку за 100 USD"""
                 await query.message.reply_text(text, reply_markup=main_keyboard())
             else:
-                key, license_type, status, expires, trial_used = license_data
+                key, license_type, status, expires, trial_used, bound_account = license_data
                 
                 # Проверяем истечение
                 if expires and check_license_expired(expires):
@@ -544,9 +755,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 text = f"""{status_emoji} Статус лицензии
 
-🔑 Ключ: `{key}`
+🔑 Ваш ПОСТОЯННЫЙ ключ: `{key}`
 {type_emoji} Тип: {license_type.title()}
 📊 Статус: {status.title()}"""
+                
+                if bound_account:
+                    text += f"\n🔐 Привязан к счету: {bound_account}"
+                else:
+                    text += f"\n🔓 Не привязан к счету (привяжется при первом использовании)"
                 
                 if expires:
                     if status == "active":
@@ -557,6 +773,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         text += f"\n❌ Истекла: {format_datetime(expires)}"
                         if license_type == "trial":
                             text += f"\n💡 Понравился EA? Купите подписку!"
+                
+                text += f"\n\n🔐 ЗАЩИТА: Ключ уникален и привязывается к торговому счету"
                 
                 keyboard = []
                 if status == "active":
@@ -576,15 +794,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif data == "download":
             license_data = get_user_license(user_id)
             
-            # Проверяем есть ли лицензия вообще
             if not license_data or not license_data[0]:
-                await query.message.reply_text("""❌ У вас нет лицензии!
-
-🆓 Получите пробную лицензию на 3 дня
-💰 Или купите месячную подписку""", reply_markup=main_keyboard())
+                await query.message.reply_text("❌ У вас нет лицензии!", reply_markup=main_keyboard())
                 return
             
-            key, license_type, status, expires, trial_used = license_data
+            key, license_type, status, expires, trial_used, bound_account = license_data
             
             # Проверяем не истекла ли лицензия
             if expires and check_license_expired(expires):
@@ -603,9 +817,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if status != 'active':
                 await query.message.reply_text("❌ Лицензия неактивна!", reply_markup=main_keyboard())
                 return
-            
-            key = license_data[0]
-            license_type = license_data[1]  # Добавляем эту строку
             
             await query.message.reply_text(f"""📁 Подготовка файла EA...
 
@@ -644,14 +855,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if license_type == "trial":
                     caption_text = f"""🤖 EA для тестирования загружен!
 
-🔑 Пробный ключ: `{key}`
+🔑 Ваш ПОСТОЯННЫЙ ключ: `{key}`
 📊 Стратегия: Богданова
 ⏰ Срок тестирования: 3 дня
 
-🎯 Рекомендации для тестирования:
-• Установите на демо счет
-• Проверьте работу на BTCUSD, XAUUSD
-• Оцените результаты за 3 дня
+🎯 Инструкция:
+1. Установите EA на MT4/MT5
+2. В настройках EA введите ключ: {key}
+3. EA автоматически привяжется к вашему счету
+4. Тестируйте 3 дня
+
+🔐 ВАЖНО: Ключ привяжется к первому торговому счету!
 
 💰 Понравилось? Купите подписку за 100 USD!
 
@@ -660,9 +874,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     caption_text = f"""🤖 Торговый советник загружен!
 
-🔑 Лицензионный ключ: `{key}`
+🔑 Ваш ПОСТОЯННЫЙ ключ: `{key}`
 📊 Стратегия: Богданова
 ⚡ Оптимизирован для VPS
+
+🎯 Инструкция:
+1. Установите EA на MT4/MT5
+2. В настройках EA введите ключ: {key}
+3. EA работает месяц до истечения лицензии
+
+🔐 ЗАЩИТА: Ключ привязан к вашему торговому счету
 
 📞 Поддержка: @rasul_asqarov_rfx
 👥 Группа: t.me/RFx_Group"""
@@ -706,9 +927,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         text=f"""🎉 ПЛАТЕЖ ПОДТВЕРЖДЕН!
 
 ✅ Месячная лицензия активирована!
-🔑 Ключ: `{license_key}`
+🔑 Ваш ключ: `{license_key}`
 ⏰ Действует до: {format_datetime(expires)}
 
+🔐 Ключ остается тем же - он ПОСТОЯННЫЙ!
 📁 Теперь можете скачать EA!""",
                         parse_mode='Markdown',
                         reply_markup=InlineKeyboardMarkup(keyboard)
@@ -720,7 +942,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🔑 Ключ: `{license_key}`
 👤 Пользователь уведомлен
-⏰ Лицензия до: {format_datetime(expires)}""", parse_mode='Markdown')
+⏰ Лицензия до: {format_datetime(expires)}
+🔐 Постоянный ключ продлен""", parse_mode='Markdown')
         
         elif data.startswith("reject_"):
             if not is_admin(user_id):
@@ -754,6 +977,9 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Сохраняем чек
         if save_receipt(payment_id, file_id):
+            # Получаем ключ пользователя
+            user_key = get_or_create_user_key(user_id)
+            
             # Отправляем админу
             try:
                 keyboard = [[
@@ -767,13 +993,16 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     caption=f"""💳 НОВАЯ ЗАЯВКА НА ОПЛАТУ
 
 👤 Пользователь: @{username} (ID: {user_id})
+🔑 Ключ пользователя: {user_key}
 💵 Сумма: {MONTHLY_PRICE} USD (1 месяц)
 🆔 Заявка №{payment_id}
 
 💳 Реквизиты для проверки:
 VISA: {VISA_CARD}
 HUMO: {HUMO_CARD}
-Владелец: {CARD_OWNER}""",
+Владелец: {CARD_OWNER}
+
+🔐 ВАЖНО: При одобрении тот же ключ будет продлен!""",
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 
@@ -781,6 +1010,7 @@ HUMO: {HUMO_CARD}
 
 ⏱️ Время обработки: 10-30 минут
 🔔 Вы получите уведомление о результате
+🔐 Ваш постоянный ключ будет продлен
 📞 Вопросы: @rasul_asqarov_rfx""", reply_markup=main_keyboard())
                 
                 context.user_data.pop('waiting_receipt', None)
@@ -834,6 +1064,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🔄 Старый файл заменен
 
 🎯 Теперь пользователи смогут скачивать этот файл!
+🔐 Файл защищен системой лицензирования
 Проверьте: /stats""")
                 
                 logger.info(f"Админ {update.effective_user.id} загрузил файл {document.file_name}")
@@ -855,6 +1086,13 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Ошибка в боте: {context.error}")
 
 # ===============================
+# ЗАПУСК API СЕРВЕРА
+# ===============================
+def run_api():
+    """Запуск Flask API в отдельном потоке"""
+    app.run(host='0.0.0.0', port=API_PORT, debug=False)
+
+# ===============================
 # ГЛАВНАЯ ФУНКЦИЯ
 # ===============================
 def main():
@@ -864,43 +1102,59 @@ def main():
         print("export BOT_TOKEN='ваш_токен_бота'")
         return
     
-    print("🔄 Инициализация...")
+    print("🔄 Инициализация защищенной системы...")
     
     # Инициализация базы данных
     init_db()
     
+    # Запуск API сервера в отдельном потоке
+    api_thread = Thread(target=run_api, daemon=True)
+    api_thread.start()
+    print(f"🔗 API сервер запущен на порту {API_PORT}")
+    
     # Создание приложения
-    app = Application.builder().token(TOKEN).build()
+    app_bot = Application.builder().token(TOKEN).build()
     
     # Добавление обработчиков
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("stats", stats_command))
-    app.add_handler(CommandHandler("upload", upload_command))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
-    app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
+    app_bot.add_handler(CommandHandler("start", start_command))
+    app_bot.add_handler(CommandHandler("stats", stats_command))
+    app_bot.add_handler(CommandHandler("upload", upload_command))
+    app_bot.add_handler(CallbackQueryHandler(button_handler))
+    app_bot.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    app_bot.add_handler(MessageHandler(filters.Document.ALL, document_handler))
     
     # Обработчик ошибок
-    app.add_error_handler(error_handler)
+    app_bot.add_error_handler(error_handler)
     
-    print("✅ Бот успешно запущен!")
-    print("=" * 50)
+    print("✅ Защищенный бот успешно запущен!")
+    print("=" * 60)
     print("🔧 КОНФИГУРАЦИЯ:")
     print(f"🆓 Пробный период: {TRIAL_DAYS} дня")
     print(f"💰 Цена за месяц: {MONTHLY_PRICE} USD")
     print(f"👨‍💼 Админ ID: {ADMIN_ID}")
-    print("=" * 50)
+    print(f"🔗 API порт: {API_PORT}")
+    print("=" * 60)
+    print("🔐 СИСТЕМА ЗАЩИТЫ:")
+    print("• Постоянные ключи пользователей")
+    print("• Привязка ключей к торговым счетам")
+    print("• API для проверки лицензий")
+    print("• Логирование всех операций")
+    print("• Защита от перепродажи")
+    print("=" * 60)
     print("📋 ДОСТУПНЫЕ КОМАНДЫ:")
     print("/start - Главное меню")
     print("/stats - Статистика (только админ)")
     print("/upload - Инструкция по загрузке EA (только админ)")
-    print("=" * 50)
-    print("📁 Для загрузки EA файла отправьте .ex5 файл боту от имени админа")
+    print("=" * 60)
+    print("🔗 API ENDPOINTS:")
+    print(f"GET /check_license?key=XXX&account=YYY - Проверка лицензии")
+    print(f"GET /health - Проверка здоровья API")
+    print("=" * 60)
     print("⚡ Бот готов к работе!")
     
     # Запуск с оптимизированными настройками
     try:
-        app.run_polling(
+        app_bot.run_polling(
             drop_pending_updates=True,
             pool_timeout=60,
             read_timeout=30,
