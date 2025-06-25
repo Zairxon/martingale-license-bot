@@ -15,6 +15,21 @@ ADMIN_ID = 295698267  # Ваш РЕАЛЬНЫЙ ID (исправлено!)
 DB_FILE = 'licenses.db'
 LICENSE_PRICE = 100
 
+# Банковские реквизиты для оплаты
+PAYMENT_CARDS = {
+    'visa': {
+        'number': '4278 3100 2430 7167',
+        'bank': 'Kapital Bank',
+        'type': 'VISA'
+    },
+    'humo': {
+        'number': '9860 1001 2541 9018', 
+        'bank': 'Kapital Bank',
+        'type': 'HUMO'
+    }
+}
+CARD_OWNER = 'Asqarov Rasulbek'
+
 # ==============================================
 # КОНСТАНТЫ С ТЕКСТАМИ
 # ==============================================
@@ -48,35 +63,34 @@ EA_DESCRIPTION = """
 """
 
 EA_INSTRUCTION = """
-📖 **ПОДРОБНАЯ ИНСТРУКЦИЯ**
+📖 **ПОДРОБНАЯ ИНСТРУКЦИЯ / BATAFSIL YO'RIQNOMA**
 
-🔧 **УСТАНОВКА:**
-1. Скачайте файл EA после получения лицензии
-2. Поместите файл в папку: MetaTrader 5/MQL5/Experts/
-3. Перезапустите MetaTrader 5
-4. Перетащите EA на график нужного символа
+🔧 **УСТАНОВКА / O'RNATISH:**
+🇷🇺 1. Скачайте файл EA после получения лицензии
+🇷🇺 2. Поместите файл в папку: MetaTrader 5/MQL5/Experts/
+🇷🇺 3. Перезапустите MetaTrader 5
+🇷🇺 4. Перетащите EA на график нужного символа
 
-📊 **НАСТРОЙКИ ДЛЯ BTCUSD:**
-• Начальный лот: 0.01
-• Take Profit: 10000 пунктов
-• Buy Stop Distance: 3000 пунктов
-• Максимум удвоений: 15
+🇺🇿 1. Litsenziya olgandan keyin EA faylini yuklab oling
+🇺🇿 2. Faylni quyidagi papkaga joylashtiring: MetaTrader 5/MQL5/Experts/
+🇺🇿 3. MetaTrader 5 ni qayta ishga tushiring
+🇺🇿 4. EA ni kerakli simvol grafigiga sudrab olib boring
 
-🥇 **НАСТРОЙКИ ДЛЯ XAUUSD:**  
-• Начальный лот: 0.01
-• Take Profit: 1000 пунктов
-• Buy Stop Distance: 300 пунктов
-• Максимум удвоений: 10
+📊 **НАСТРОЙКИ ДЛЯ BTCUSD / BTCUSD SOZLAMALARI:**
+🇷🇺 • Начальный лот: 0.01 • Take Profit: 10000 пунктов • Buy Stop Distance: 3000 пунктов • Максимум удвоений: 15
+🇺🇿 • Boshlang'ich lot: 0.01 • Take Profit: 10000 punkt • Buy Stop masofasi: 3000 punkt • Maksimal ikkilanish: 15
 
-💡 **РЕКОМЕНДАЦИИ:**
-• Торгуйте только на VPS
-• Используйте ECN счета с низким спредом
-• Мониторьте первые сделки внимательно
+🥇 **НАСТРОЙКИ ДЛЯ XAUUSD / XAUUSD SOZLAMALARI:**  
+🇷🇺 • Начальный лот: 0.01 • Take Profit: 1000 пунктов • Buy Stop Distance: 300 пунктов • Максимум удвоений: 10
+🇺🇿 • Boshlang'ich lot: 0.01 • Take Profit: 1000 punkt • Buy Stop masofasi: 300 punkt • Maksimal ikkilanish: 10
 
-🆘 **ПОДДЕРЖКА:**
-• Telegram: @Zair_Khudayberganov
-• Email: zairxon@gmail.com
-• Канал: @RFx_SIGNAL
+💡 **РЕКОМЕНДАЦИИ / TAVSIYALAR:**
+🇷🇺 • Торгуйте только на VPS • Используйте ECN счета с низким спредом • Мониторьте первые сделки внимательно
+🇺🇿 • Faqat VPS da savdo qiling • Past spred bilan ECN hisoblarni ishlating • Birinchi bitimlarni diqqat bilan kuzating
+
+🆘 **ПОДДЕРЖКА / QULLAB-QUVVATLASH:**
+• Telegram: @rasul_asqarov_rfx
+• Группа / Guruh: t.me/RFx_Group
 """
 
 # ==============================================
@@ -388,11 +402,11 @@ def get_license_stats():
 def get_main_keyboard():
     """Главная клавиатура"""
     keyboard = [
-        [InlineKeyboardButton("🆓 Получить 3 дня БЕСПЛАТНО", callback_data="get_trial")],
-        [InlineKeyboardButton("💰 Купить полную лицензию ($100)", callback_data="buy_license")],
-        [InlineKeyboardButton("📊 Мой статус", callback_data="check_status")],
-        [InlineKeyboardButton("📖 Описание советника", callback_data="show_description")],
-        [InlineKeyboardButton("📖 Инструкция", callback_data="show_instruction")]
+        [InlineKeyboardButton("🆓 Получить 3 дня БЕСПЛАТНО / 3 kun BEPUL olish", callback_data="get_trial")],
+        [InlineKeyboardButton("💰 Купить полную лицензию ($100) / To'liq litsenziya sotib olish", callback_data="buy_license")],
+        [InlineKeyboardButton("📊 Мой статус / Mening holatim", callback_data="check_status")],
+        [InlineKeyboardButton("📖 Описание советника / Maslahatchi tavsifi", callback_data="show_description")],
+        [InlineKeyboardButton("📖 Инструкция / Yo'riqnoma", callback_data="show_instruction")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -406,15 +420,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     register_user(user.id, user.username or "Unknown")
     
     welcome_text = (
-        "🤖 **Добро пожаловать в Martingale EA License Bot!**\n\n"
+        "🤖 **Добро пожаловать в Bagdanov Strategy EA License Bot!**\n"
+        "🤖 **Bogdanov strategiyasi EA License Bot ga xush kelibsiz!**\n\n"
         "🎯 **Этот бот предоставляет доступ к торговому советнику:**\n"
-        "• Автоматическая торговля по стратегии Мартингейл\n"
-        "• Поддержка BTCUSD и XAUUSD\n"
-        "• VPS оптимизированная версия\n\n"
-        "💡 **Доступные опции:**\n"
-        "🆓 **Пробная лицензия** - 3 дня бесплатно\n"
-        "💰 **Полная лицензия** - $100 (безлимитный доступ)\n\n"
-        "⬇️ Выберите действие:"
+        "🎯 **Ushbu bot savdo maslahatchiiga kirish imkonini beradi:**\n"
+        "🇷🇺 • Автоматическая торговля по стратегии Багданова\n"
+        "🇺🇿 • Bogdanov strategiyasi bo'yicha avtomatik savdo\n"
+        "🇷🇺 • Поддержка BTCUSD и XAUUSD\n"
+        "🇺🇿 • BTCUSD va XAUUSD qo'llab-quvvatlash\n"
+        "🇷🇺 • VPS оптимизированная версия\n"
+        "🇺🇿 • VPS optimallashtirilgan versiya\n\n"
+        "💡 **Доступные опции / Mavjud variantlar:**\n"
+        "🆓 **Пробная лицензия / Sinov litsenziyasi** - 3 дня бесплатно / kun bepul\n"
+        "💰 **Полная лицензия / To'liq litsenziya** - $100 (безлимитный доступ / cheksiz kirish)\n\n"
+        "👥 **Наша группа / Bizning guruh:** t.me/RFx_Group\n"
+        "📞 **Поддержка / Qo'llab-quvvatlash:** @rasul_asqarov_rfx\n\n"
+        "⬇️ Выберите действие / Harakatni tanlang:"
     )
     
     await update.message.reply_text(welcome_text, parse_mode='Markdown', reply_markup=get_main_keyboard())
@@ -430,9 +451,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 **📖 Описание** - детали о торговом советнике\n"
         "🔹 **📖 Инструкция** - руководство по установке\n\n"
         "📞 **Поддержка:**\n"
-        "• Telegram: @Zair_Khudayberganov\n"
-        "• Email: zairxon@gmail.com\n"
-        "• Канал: @RFx_SIGNAL"
+        "• Telegram: @rasul_asqarov_rfx\n"
+        "• Группа: t.me/RFx_Group"
     )
     
     await update.message.reply_text(help_text, parse_mode='Markdown', reply_markup=get_main_keyboard())
@@ -466,9 +486,11 @@ async def cmd_upload_ea(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     await update.message.reply_text(
-        "📁 **Загрузка EA файла**\n\n"
-        "Отправьте .ex5 файл для загрузки в систему.\n"
-        "Этот файл будут получать пользователи при скачивании EA.",
+        "📁 **Загрузка EA файла / EA fayl yuklash**\n\n"
+        "🇷🇺 Отправьте .ex5 файл для загрузки в систему.\n"
+        "🇺🇿 Tizimga yuklash uchun .ex5 faylini yuboring.\n"
+        "🇷🇺 Этот файл будут получать пользователи при скачивании EA.\n"
+        "🇺🇿 Ushbu faylni foydalanuvchilar EA yuklab olishda olishadi.",
         parse_mode='Markdown'
     )
 
@@ -623,20 +645,31 @@ async def handle_buy_license(update: Update, context: ContextTypes.DEFAULT_TYPE)
     ]
     
     await query.message.reply_text(
-        f"💳 **ОПЛАТА ПОЛНОЙ ЛИЦЕНЗИИ**\n\n"
-        f"💵 **Сумма:** ${LICENSE_PRICE}\n\n"
-        f"💳 **РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ:**\n"
-        f"🏦 **Карта VISA:** `4278 3200 2190 9386`\n"
-        f"👤 **Имя:** Zair Khudayberganov\n"
-        f"🏛️ **Банк:** Kapital VISA\n\n"
-        f"📝 **ИНСТРУКЦИЯ:**\n"
-        f"1. Переведите ${LICENSE_PRICE} на указанную карту\n"
-        f"2. Сделайте скриншот чека об оплате\n"
-        f"3. Нажмите кнопку \"✅ Я оплатил\"\n"
-        f"4. Отправьте фото чека\n"
-        f"5. Ожидайте подтверждения (обычно 10-30 минут)\n\n"
-        f"📞 **Вопросы:** @Zair_Khudayberganov\n\n"
-        f"⚠️ **Внимание:** Лицензия активируется только после подтверждения платежа!",
+        f"💳 **ОПЛАТА ПОЛНОЙ ЛИЦЕНЗИИ / TO'LIQ LITSENZIYA TO'LOVI**\n\n"
+        f"💵 **Сумма / Summa:** ${LICENSE_PRICE} (или эквивалент в сумах)\n\n"
+        f"💳 **РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ / TO'LOV REKVIZITLARI:**\n\n"
+        f"🏦 **VISA Kapital:** `{PAYMENT_CARDS['visa']['number']}`\n"
+        f"🏦 **HUMO Kapital:** `{PAYMENT_CARDS['humo']['number']}`\n"
+        f"👤 **Владелец / Egasi:** {CARD_OWNER}\n"
+        f"🏛️ **Банк:** Kapital Bank\n"
+        f"🌍 **Валюта:** USD/UZS\n\n"
+        f"📝 **ИНСТРУКЦИЯ / YO'RIQNOMA:**\n"
+        f"🇷🇺 1. Переведите ${LICENSE_PRICE} на любую из указанных карт\n"
+        f"🇺🇿 1. Ko'rsatilgan kartalardan biriga ${LICENSE_PRICE} o'tkazing\n"
+        f"🇷🇺 2. Сделайте скриншот чека об оплате\n"
+        f"🇺🇿 2. To'lov chekining skrinshotini oling\n"
+        f"🇷🇺 3. Нажмите кнопку \"✅ Я оплатил\"\n"
+        f"🇺🇿 3. \"✅ Men to'ladim\" tugmasini bosing\n"
+        f"🇷🇺 4. Отправьте фото чека через бота\n"
+        f"🇺🇿 4. Chek rasmini bot orqali yuboring\n"
+        f"🇷🇺 5. Ожидайте подтверждения (обычно 10-30 минут)\n"
+        f"🇺🇿 5. Tasdiqlashni kuting (odatda 10-30 daqiqa)\n\n"
+        f"📞 **Вопросы / Savollar:** @rasul_asqarov_rfx\n"
+        f"👥 **Группа / Guruh:** t.me/RFx_Group\n\n"
+        f"⚠️ **ВНИМАНИЕ / DIQQAT:** \n"
+        f"🇷🇺 Лицензия активируется ТОЛЬКО после подтверждения платежа администратором!\n"
+        f"🇺🇿 Litsenziya FAQAT administrator tomonidan to'lov tasdiqlanganidan keyin faollashadi!\n"
+        f"🚫 **Платеж обязательно через бота с отправкой чека!**",
         parse_mode='Markdown',
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
@@ -702,17 +735,26 @@ async def handle_payment_sent(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     
     await query.message.reply_text(
-        f"📸 **ОТПРАВЬТЕ ЧЕК ОБ ОПЛАТЕ**\n\n"
-        f"📋 **Пришлите фото или скриншот чека** об оплате ${LICENSE_PRICE}\n\n"
-        f"✅ **Чек должен содержать:**\n"
-        f"• Сумму: ${LICENSE_PRICE}\n"
-        f"• Дату и время операции\n"
-        f"• Номер карты получателя\n\n"
-        f"⏱️ **После отправки чека:**\n"
-        f"• Ваша заявка будет рассмотрена\n"
-        f"• Обработка: 10-30 минут\n"
-        f"• Вы получите уведомление о результате\n\n"
-        f"📞 Вопросы: @Zair_Khudayberganov",
+        f"📸 **ОТПРАВЬТЕ ЧЕК ОБ ОПЛАТЕ / TO'LOV CHEKINI YUBORING**\n\n"
+        f"📋 **Пришлите фото или скриншот чека об оплате ${LICENSE_PRICE}**\n"
+        f"📋 **${LICENSE_PRICE} to'lov chekining rasmini yoki skrinshotini yuboring**\n\n"
+        f"✅ **Чек должен содержать / Chek o'z ichiga olishi kerak:**\n"
+        f"• Сумму / Summa: ${LICENSE_PRICE}\n"
+        f"• Дату и время операции / Operatsiya sanasi va vaqti\n"
+        f"• Номер карты получателя / Oluvchi karta raqami:\n"
+        f"  - VISA: {PAYMENT_CARDS['visa']['number']}\n"
+        f"  - HUMO: {PAYMENT_CARDS['humo']['number']}\n"
+        f"• Имя получателя / Oluvchi ismi: {CARD_OWNER}\n\n"
+        f"⏱️ **После отправки чека / Chek yuborilganidan keyin:**\n"
+        f"🇷🇺 • Ваша заявка будет рассмотрена администратором\n"
+        f"🇺🇿 • Sizning arizangiz administrator tomonidan ko'rib chiqiladi\n"
+        f"🇷🇺 • Обработка: 10-30 минут\n"
+        f"🇺🇿 • Qayta ishlash: 10-30 daqiqa\n"
+        f"🇷🇺 • Вы получите уведомление о результате\n"
+        f"🇺🇿 • Natija haqida xabar olasiz\n\n"
+        f"📞 Вопросы / Savollar: @rasul_asqarov_rfx\n"
+        f"👥 Группа / Guruh: t.me/RFx_Group\n\n"
+        f"🚫 **ВАЖНО: Платеж ТОЛЬКО через бота с отправкой чека!**",
         parse_mode='Markdown'
     )
     
@@ -760,7 +802,11 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=f"💳 **НОВАЯ ЗАЯВКА НА ОПЛАТУ**\n\n"
                         f"👤 **Пользователь:** @{username} (ID: {user_id})\n"
                         f"💵 **Сумма:** ${LICENSE_PRICE}\n"
-                        f"🆔 **ID заявки:** {request_id}\n\n"
+                        f"🆔 **ID заявки:** {request_id}\n"
+                        f"💳 **Реквизиты для проверки:**\n"
+                        f"   VISA: {PAYMENT_CARDS['visa']['number']}\n"
+                        f"   HUMO: {PAYMENT_CARDS['humo']['number']}\n"
+                        f"   Владелец: {CARD_OWNER}\n\n"
                         f"📸 **Чек об оплате приложен выше**",
                 parse_mode='Markdown',
                 reply_markup=InlineKeyboardMarkup(admin_keyboard)
@@ -768,12 +814,14 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Уведомляем пользователя
             await update.message.reply_text(
-                f"✅ **ЧЕК ПОЛУЧЕН!**\n\n"
-                f"📸 Ваш чек об оплате отправлен на проверку\n"
-                f"⏱️ **Время обработки:** 10-30 минут\n"
-                f"🔔 Вы получите уведомление о результате\n\n"
-                f"🆔 **Номер заявки:** {request_id}\n\n"
-                f"📞 Вопросы: @Zair_Khudayberganov",
+                f"✅ **ЧЕК ПОЛУЧЕН! / CHEK QABUL QILINDI!**\n\n"
+                f"📸 Ваш чек об оплате отправлен на проверку администратору\n"
+                f"📸 To'lov chekingiz tekshirish uchun administratorga yuborildi\n"
+                f"⏱️ **Время обработки / Qayta ishlash vaqti:** 10-30 минут / daqiqa\n"
+                f"🔔 Вы получите уведомление о результате / Natija haqida xabar olasiz\n\n"
+                f"🆔 **Номер заявки / Ariza raqami:** {request_id}\n\n"
+                f"📞 Вопросы / Savollar: @rasul_asqarov_rfx\n"
+                f"👥 Группа / Guruh: t.me/RFx_Group",
                 parse_mode='Markdown',
                 reply_markup=get_main_keyboard()
             )
@@ -909,13 +957,18 @@ def main():
     
     print("✅ Бот запущен и готов к работе!")
     print(f"👨‍💼 Admin ID: {ADMIN_ID}")
-    print("📞 Поддержка: @Zair_Khudayberganov")
+    print("📞 Поддержка: @rasul_asqarov_rfx")
+    print("👥 Группа: t.me/RFx_Group")
     print("\n📋 ДОСТУПНЫЕ АДМИНСКИЕ КОМАНДЫ:")
     print("• /stats - статистика бота")
     print("• /upload_ea - загрузка EA файла")
     print("• /payments - ожидающие платежи")
     print("• Одобрение/отклонение платежей через кнопки")
-    print("\n⚠️ ВАЖНО: Обновите реквизиты карты в коде!")
+    print("\n💳 Реквизиты для оплаты:")
+    print(f"   VISA Kapital: {PAYMENT_CARDS['visa']['number']}")
+    print(f"   HUMO Kapital: {PAYMENT_CARDS['humo']['number']}")
+    print(f"   Владелец: {CARD_OWNER}")
+    print("\n🚫 ВАЖНО: Платежи ТОЛЬКО через бота с отправкой чеков!")
     
     # Запускаем бота
     app.run_polling(drop_pending_updates=True)
