@@ -35,31 +35,31 @@ CARD_OWNER = 'Asqarov Rasulbek'
 # ==============================================
 
 EA_DESCRIPTION = """
-🤖 **АВТОМАТИЧЕСКИЙ ТОРГОВЫЙ СОВЕТНИК**
-📊 **Тип:** Мартингейл стратегия
-💰 **Символы:** BTCUSD, XAUUSD (Gold)
+🤖 **АВТОМАТИЧЕСКИЙ ТОРГОВЫЙ СОВЕТНИК / AVTOMATIK SAVDO MASLAHATCHI**
 
-⚙️ **НАСТРОЙКИ ПО УМОЛЧАНИЮ:**
+📊 **Тип / Turi:** Стратегия Богданова / Bogdanov strategiyasi
+💰 **Символы / Simbollar:** BTCUSD, XAUUSD (Gold/Oltin)
+
+⚙️ **НАСТРОЙКИ ПО УМОЛЧАНИЮ / STANDART SOZLAMALAR:**
 
 📈 **BTCUSD:**
-• Начальный лот: 0.01
-• Take Profit: 10000 пунктов  
-• Расстояние стопов: 3000 пунктов
-• Максимум удвоений: 15
+🇷🇺 • Начальный лот: 0.01 • Take Profit: 10000 пунктов • Расстояние стопов: 3000 пунктов • Максимум удвоений: 15
+🇺🇿 • Boshlang'ich lot: 0.01 • Take Profit: 10000 punkt • Stop masofasi: 3000 punkt • Maksimal ikkilanish: 15
 
-🥇 **XAUUSD (Gold):**
-• Начальный лот: 0.01
-• Take Profit: 1000 пунктов
-• Расстояние стопов: 300 пунктов  
-• Максимум удвоений: 10
+🥇 **XAUUSD (Gold/Oltin):**
+🇷🇺 • Начальный лот: 0.01 • Take Profit: 1000 пунктов • Расстояние стопов: 300 пунктов • Максимум удвоений: 10
+🇺🇿 • Boshlang'ich lot: 0.01 • Take Profit: 1000 punkt • Stop masofasi: 300 punkt • Maksimal ikkilanish: 10
 
-✅ VPS оптимизированный
-✅ Автоматическое определение тренда
-✅ Защита от больших просадок
+🎯 **ОСОБЕННОСТИ / XUSUSIYATLAR:**
+✅ VPS оптимизированный / VPS optimallashtirilgan
+✅ Автоматическое определение тренда / Avtomatik trend aniqlash
+✅ Защита от больших просадок / Katta pasayishlardan himoya
+✅ Умная система стоп-лоссов / Aqlli stop-loss tizimi
+✅ Автоматический перезапуск сессий / Avtomatik sessiya qayta ishga tushirish
 
-⚠️ **ВНИМАНИЕ:** 
-Мартингейл стратегия требует достаточного депозита.
-Рекомендуемый депозит: от $1000 на 0.01 лот.
+⚠️ **ВНИМАНИЕ / DIQQAT:** 
+🇷🇺 Стратегия Богданова требует достаточного депозита и понимания рисков. Рекомендуемый депозит: от $1000 на 0.01 лот.
+🇺🇿 Bogdanov strategiyasi yetarli depozit va xavflarni tushunishni talab qiladi. Tavsiya qilingan depozit: 0.01 lot uchun $1000 dan.
 """
 
 EA_INSTRUCTION = """
@@ -177,14 +177,67 @@ def create_trial_license(user_id):
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         
-        # Проверяем, была ли пробная лицензия
+        # Проверяем, была ли уже пробная лицензия
         cursor.execute('SELECT license_key FROM users WHERE user_id = ? AND license_type = "trial"', 
                       (user_id,))
         existing = cursor.fetchone()
         
         if existing:
             conn.close()
-            return None
+            return None, "У вас уже была пробная лицензия"
+        
+        # Создаем новую пробную лицензию
+        license_key = generate_license_key()
+        expires_at = datetime.now() + timedelta(days=3)
+        
+        cursor.execute('''
+            UPDATE users 
+            SET license_key = ?, license_type = 'trial', license_status = 'active', expires_at = ?
+            WHERE user_id = ?
+        ''', (license_key, expires_at, user_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return license_key, None
+        
+    except Exception as e:
+        return None, "Ошибка создания лицензии"
+
+def create_full_license(user_id):
+    """Создание полной лицензии"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # Создаем полную лицензию
+        license_key = generate_license_key()
+        
+        cursor.execute('''
+            UPDATE users 
+            SET license_key = ?, license_type = 'full', license_status = 'active', expires_at = NULL
+            WHERE user_id = ?
+        ''', (license_key, user_id))
+        
+        conn.commit()
+        conn.close()
+        return license_key
+        
+    except Exception as e:
+        return None
+
+def get_user_license(user_id):
+    """Получить лицензию пользователя"""
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('SELECT license_key, license_status, license_type, expires_at FROM users WHERE user_id = ?', 
+                      (user_id,))
+        result = cursor.fetchone()
+        conn.close()
+        return result
+    except Exception as e:
+        return None
 
 def create_payment_request(user_id, username):
     """Создать заявку на оплату"""
@@ -284,61 +337,7 @@ def reject_payment(request_id):
         conn.close()
         return True
     except Exception as e:
-        return False, "У вас уже была пробная лицензия"
-        
-        # Создаем новую лицензию
-        license_key = generate_license_key()
-        expires_at = datetime.now() + timedelta(days=3)
-        
-        cursor.execute('''
-            UPDATE users 
-            SET license_key = ?, license_type = 'trial', license_status = 'active', expires_at = ?
-            WHERE user_id = ?
-        ''', (license_key, expires_at, user_id))
-        
-        conn.commit()
-        conn.close()
-        return license_key, None
-        
-    except Exception as e:
-        return None, "Ошибка создания лицензии"
-
-        return None, "Ошибка создания лицензии"
-
-def create_full_license(user_id):
-    """Создание полной лицензии"""
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        
-        # Создаем полную лицензию
-        license_key = generate_license_key()
-        
-        cursor.execute('''
-            UPDATE users 
-            SET license_key = ?, license_type = 'full', license_status = 'active', expires_at = NULL
-            WHERE user_id = ?
-        ''', (license_key, user_id))
-        
-        conn.commit()
-        conn.close()
-        return license_key
-        
-    except Exception as e:
-        return None
-
-def get_user_license(user_id):
-    """Получить лицензию пользователя"""
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute('SELECT license_key, license_status, license_type, expires_at FROM users WHERE user_id = ?', 
-                      (user_id,))
-        result = cursor.fetchone()
-        conn.close()
-        return result
-    except Exception as e:
-        return None
+        return False
 
 def save_ea_file(file_data, filename):
     """Сохранить EA файл"""
@@ -493,6 +492,30 @@ async def cmd_upload_ea(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🇺🇿 Ushbu faylni foydalanuvchilar EA yuklab olishda olishadi.",
         parse_mode='Markdown'
     )
+
+async def cmd_payments(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Команда /payments - список ожидающих платежей"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("❌ Доступ запрещен!")
+        return
+    
+    payments = get_pending_payments()
+    
+    if not payments:
+        await update.message.reply_text("📋 Нет ожидающих заявок на оплату")
+        return
+    
+    text = "💳 **ОЖИДАЮЩИЕ ЗАЯВКИ:**\n\n"
+    
+    for payment in payments:
+        request_id, user_id, username, amount, file_id, created_at = payment
+        text += f"🆔 **ID:** {request_id}\n"
+        text += f"👤 **Пользователь:** @{username} (ID: {user_id})\n"
+        text += f"💵 **Сумма:** ${amount}\n"
+        text += f"📅 **Дата:** {created_at}\n"
+        text += f"---\n"
+    
+    await update.message.reply_text(text, parse_mode='Markdown')
 
 # ==============================================
 # ОБРАБОТЧИКИ CALLBACK ЗАПРОСОВ
@@ -674,6 +697,38 @@ async def handle_buy_license(update: Update, context: ContextTypes.DEFAULT_TYPE)
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
+async def handle_payment_sent(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кнопки 'Я оплатил'"""
+    query = update.callback_query
+    await query.answer()
+    
+    await query.message.reply_text(
+        f"📸 **ОТПРАВЬТЕ ЧЕК ОБ ОПЛАТЕ / TO'LOV CHEKINI YUBORING**\n\n"
+        f"📋 **Пришлите фото или скриншот чека об оплате ${LICENSE_PRICE}**\n"
+        f"📋 **${LICENSE_PRICE} to'lov chekining rasmini yoki skrinshotini yuboring**\n\n"
+        f"✅ **Чек должен содержать / Chek o'z ichiga olishi kerak:**\n"
+        f"• Сумму / Summa: ${LICENSE_PRICE}\n"
+        f"• Дату и время операции / Operatsiya sanasi va vaqti\n"
+        f"• Номер карты получателя / Oluvchi karta raqami:\n"
+        f"  - VISA: {PAYMENT_CARDS['visa']['number']}\n"
+        f"  - HUMO: {PAYMENT_CARDS['humo']['number']}\n"
+        f"• Имя получателя / Oluvchi ismi: {CARD_OWNER}\n\n"
+        f"⏱️ **После отправки чека / Chek yuborilganidan keyin:**\n"
+        f"🇷🇺 • Ваша заявка будет рассмотрена администратором\n"
+        f"🇺🇿 • Sizning arizangiz administrator tomonidan ko'rib chiqiladi\n"
+        f"🇷🇺 • Обработка: 10-30 минут\n"
+        f"🇺🇿 • Qayta ishlash: 10-30 daqiqa\n"
+        f"🇷🇺 • Вы получите уведомление о результате\n"
+        f"🇺🇿 • Natija haqida xabar olasiz\n\n"
+        f"📞 Вопросы / Savollar: @rasul_asqarov_rfx\n"
+        f"👥 Группа / Guruh: t.me/RFx_Group\n\n"
+        f"🚫 **ВАЖНО: Платеж ТОЛЬКО через бота с отправкой чека!**",
+        parse_mode='Markdown'
+    )
+    
+    # Устанавливаем флаг ожидания чека
+    context.user_data['waiting_for_receipt'] = True
+
 async def handle_download_ea(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Скачивание EA"""
     query = update.callback_query
@@ -729,43 +784,15 @@ async def handle_download_ea(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=get_main_keyboard()
         )
 
-async def handle_payment_sent(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик кнопки 'Я оплатил'"""
-    query = update.callback_query
-    await query.answer()
-    
-    await query.message.reply_text(
-        f"📸 **ОТПРАВЬТЕ ЧЕК ОБ ОПЛАТЕ / TO'LOV CHEKINI YUBORING**\n\n"
-        f"📋 **Пришлите фото или скриншот чека об оплате ${LICENSE_PRICE}**\n"
-        f"📋 **${LICENSE_PRICE} to'lov chekining rasmini yoki skrinshotini yuboring**\n\n"
-        f"✅ **Чек должен содержать / Chek o'z ichiga olishi kerak:**\n"
-        f"• Сумму / Summa: ${LICENSE_PRICE}\n"
-        f"• Дату и время операции / Operatsiya sanasi va vaqti\n"
-        f"• Номер карты получателя / Oluvchi karta raqami:\n"
-        f"  - VISA: {PAYMENT_CARDS['visa']['number']}\n"
-        f"  - HUMO: {PAYMENT_CARDS['humo']['number']}\n"
-        f"• Имя получателя / Oluvchi ismi: {CARD_OWNER}\n\n"
-        f"⏱️ **После отправки чека / Chek yuborilganidan keyin:**\n"
-        f"🇷🇺 • Ваша заявка будет рассмотрена администратором\n"
-        f"🇺🇿 • Sizning arizangiz administrator tomonidan ko'rib chiqiladi\n"
-        f"🇷🇺 • Обработка: 10-30 минут\n"
-        f"🇺🇿 • Qayta ishlash: 10-30 daqiqa\n"
-        f"🇷🇺 • Вы получите уведомление о результате\n"
-        f"🇺🇿 • Natija haqida xabar olasiz\n\n"
-        f"📞 Вопросы / Savollar: @rasul_asqarov_rfx\n"
-        f"👥 Группа / Guruh: t.me/RFx_Group\n\n"
-        f"🚫 **ВАЖНО: Платеж ТОЛЬКО через бота с отправкой чека!**",
-        parse_mode='Markdown'
-    )
-    
-    # Устанавливаем флаг ожидания чека
-    context.user_data['waiting_for_receipt'] = True
-
 async def handle_back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Возврат в главное меню"""
     query = update.callback_query
     await query.answer()
     await cmd_start(update, context)
+
+# ==============================================
+# ОБРАБОТЧИКИ ФОТО И ДОКУМЕНТОВ
+# ==============================================
 
 async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик фото (чеки об оплате)"""
@@ -837,59 +864,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Ошибка сохранения чека!")
 
-# ==============================================
-# АДМИНСКИЕ КОМАНДЫ ДЛЯ ПЛАТЕЖЕЙ  
-# ==============================================
-
-async def cmd_payments(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /payments - список ожидающих платежей"""
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("❌ Доступ запрещен!")
-        return
-    
-    payments = get_pending_payments()
-    
-    if not payments:
-        await update.message.reply_text("📋 Нет ожидающих заявок на оплату")
-        return
-    
-    text = "💳 **ОЖИДАЮЩИЕ ЗАЯВКИ:**\n\n"
-    
-    for payment in payments:
-        request_id, user_id, username, amount, file_id, created_at = payment
-        text += f"🆔 **ID:** {request_id}\n"
-        text += f"👤 **Пользователь:** @{username} (ID: {user_id})\n"
-        text += f"💵 **Сумма:** ${amount}\n"
-        text += f"📅 **Дата:** {created_at}\n"
-        text += f"---\n"
-    
-    await update.message.reply_text(text, parse_mode='Markdown')
-# ==============================================
-
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик callback запросов"""
-    query = update.callback_query
-    data = query.data
-    
-    if data == "get_trial":
-        await handle_get_trial(update, context)
-    elif data == "check_status":
-        await handle_check_status(update, context)
-    elif data == "show_description":
-        await handle_show_description(update, context)
-    elif data == "show_instruction":
-        await handle_show_instruction(update, context)
-    elif data == "buy_license":
-        await handle_buy_license(update, context)
-    elif data == "download_ea":
-        await handle_download_ea(update, context)
-    elif data == "back_to_menu":
-        await handle_back_to_menu(update, context)
-
-# ==============================================
-# ОБРАБОТЧИК ДОКУМЕНТОВ (ДЛЯ АДМИНОВ)
-# ==============================================
-
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик документов"""
     if not is_admin(update.effective_user.id):
@@ -922,6 +896,158 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     except Exception as e:
         await update.message.reply_text("❌ Ошибка при загрузке файла!")
+
+# ==============================================
+# ОБРАБОТЧИК CALLBACK ЗАПРОСОВ
+# ==============================================
+
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик callback запросов"""
+    query = update.callback_query
+    data = query.data
+    
+    if data == "get_trial":
+        await handle_get_trial(update, context)
+    elif data == "check_status":
+        await handle_check_status(update, context)
+    elif data == "show_description":
+        await handle_show_description(update, context)
+    elif data == "show_instruction":
+        await handle_show_instruction(update, context)
+    elif data == "buy_license":
+        await handle_buy_license(update, context)
+    elif data == "download_ea":
+        await handle_download_ea(update, context)
+    elif data == "payment_sent":
+        await handle_payment_sent(update, context)
+    elif data == "back_to_menu":
+        await handle_back_to_menu(update, context)
+    # Админские callback'и для платежей
+    elif data.startswith("approve_"):
+        await handle_admin_approve_payment(update, context)
+    elif data.startswith("reject_"):
+        await handle_admin_reject_payment(update, context)
+
+async def handle_admin_approve_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Админ одобряет платеж"""
+    if not is_admin(update.effective_user.id):
+        await update.callback_query.answer("❌ Доступ запрещен!")
+        return
+    
+    query = update.callback_query
+    request_id = int(query.data.split("_")[1])
+    
+    # Одобряем платеж
+    license_key = approve_payment(request_id)
+    
+    if license_key:
+        # Получаем данные пользователя из заявки
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id, username FROM payment_requests WHERE id = ?', (request_id,))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                user_id, username = result
+                
+                # Уведомляем пользователя
+                try:
+                    keyboard = [
+                        [InlineKeyboardButton("📁 Скачать EA", callback_data="download_ea")],
+                        [InlineKeyboardButton("🔙 В главное меню", callback_data="back_to_menu")]
+                    ]
+                    
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=f"🎉 **ПЛАТЕЖ ПОДТВЕРЖДЕН! / TO'LOV TASDIQLANDI!**\n\n"
+                             f"✅ Ваша полная лицензия активирована!\n"
+                             f"✅ To'liq litsenziyangiz faollashtirildi!\n\n"
+                             f"🔑 **Лицензионный ключ / Litsenziya kaliti:**\n`{license_key}`\n\n"
+                             f"♾️ **Срок действия / Amal qilish muddati:** Безлимитный / Cheksiz\n\n"
+                             f"📁 Теперь вы можете скачать EA и начать торговлю!\n"
+                             f"📁 Endi EA yuklab olib, savdoni boshlashingiz mumkin!\n\n"
+                             f"💡 **Сохраните ключ - он понадобится для запуска советника!**\n"
+                             f"💡 **Kalitni saqlang - maslahatchi ishga tushirish uchun kerak bo'ladi!**\n\n"
+                             f"👥 **Группа / Guruh:** t.me/RFx_Group\n"
+                             f"📞 **Поддержка / Qo'llab-quvvatlash:** @rasul_asqarov_rfx\n\n"
+                             f"🎯 **Лицензия выдана только после проверки администратором!**",
+                        parse_mode='Markdown',
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                except:
+                    pass  # Если не удалось отправить пользователю
+                
+                # Подтверждаем админу
+                await query.message.edit_text(
+                    f"✅ **ПЛАТЕЖ ОДОБРЕН**\n\n"
+                    f"👤 Пользователь: @{username}\n"
+                    f"🔑 Выдан ключ: `{license_key}`\n"
+                    f"📅 Обработано: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            await query.answer("❌ Ошибка обработки!")
+    else:
+        await query.answer("❌ Ошибка одобрения платежа!")
+
+async def handle_admin_reject_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Админ отклоняет платеж"""
+    if not is_admin(update.effective_user.id):
+        await update.callback_query.answer("❌ Доступ запрещен!")
+        return
+    
+    query = update.callback_query
+    request_id = int(query.data.split("_")[1])
+    
+    # Отклоняем платеж
+    if reject_payment(request_id):
+        # Получаем данные пользователя
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id, username FROM payment_requests WHERE id = ?', (request_id,))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                user_id, username = result
+                
+                # Уведомляем пользователя
+                try:
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=f"❌ **ПЛАТЕЖ ОТКЛОНЕН / TO'LOV RAD ETILDI**\n\n"
+                             f"🇷🇺 К сожалению, ваш платеж не прошел проверку.\n"
+                             f"🇺🇿 Afsuski, sizning to'lovingiz tekshiruvdan o'tmadi.\n\n"
+                             f"**Возможные причины / Mumkin bo'lgan sabablar:**\n"
+                             f"• Неверная сумма платежа / Noto'g'ri to'lov summasi\n"
+                             f"• Неразборчивый чек / Tushunarli bo'lmagan chek\n"
+                             f"• Платеж не поступил / To'lov kelmadi\n"
+                             f"• Неверные реквизиты / Noto'g'ri rekvizitlar\n\n"
+                             f"📞 **Обратитесь за помощью / Yordam uchun murojaat qiling:** @rasul_asqarov_rfx\n"
+                             f"👥 **Группа / Guruh:** t.me/RFx_Group\n\n"
+                             f"💡 Вы можете попробовать оплатить еще раз / Qayta to'lashni urinib ko'rishingiz mumkin",
+                        parse_mode='Markdown',
+                        reply_markup=get_main_keyboard()
+                    )
+                except:
+                    pass
+                
+                # Подтверждаем админу
+                await query.message.edit_text(
+                    f"❌ **ПЛАТЕЖ ОТКЛОНЕН**\n\n"
+                    f"👤 Пользователь: @{username}\n"
+                    f"📅 Обработано: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            await query.answer("❌ Ошибка обработки!")
+    else:
+        await query.answer("❌ Ошибка отклонения платежа!")
 
 # ==============================================
 # ГЛАВНАЯ ФУНКЦИЯ
