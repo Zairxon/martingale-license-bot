@@ -274,10 +274,17 @@ def get_ea_file():
         if result:
             filename, file_data = result
             logger.info(f"EA файл найден: {filename}, размер: {len(file_data)} байт")
+            
+            # Дополнительная проверка данных
+            if not file_data or len(file_data) == 0:
+                logger.error("EA файл пуст!")
+                return None, None
+                
             return filename, file_data
         else:
             logger.warning("EA файл не найден в базе данных")
             return None, None
+            
     except Exception as e:
         logger.error(f"Ошибка получения EA: {e}")
         return None, None
@@ -323,7 +330,7 @@ def get_stats():
 # ===============================
 def main_keyboard():
     keyboard = [
-        [InlineKeyboardButton("🆓 3 дня БЕСПЛАТНО", callback_data="trial")],
+        [InlineKeyboardButton("🆓 3 дня БЕСПЛАТНО + EA файл", callback_data="trial")],
         [InlineKeyboardButton("💰 Купить месяц - 100 USD", callback_data="buy")],
         [InlineKeyboardButton("📊 Мой статус", callback_data="status")],
         [InlineKeyboardButton("📖 Описание EA", callback_data="info")]
@@ -342,8 +349,15 @@ EA_INFO = """🤖 ТОРГОВЫЙ СОВЕТНИК
 🔄 Автоматическая торговля
 💰 Рекомендуемый депозит: от 1000 USD
 
-🆓 Пробный период: 3 дня бесплатно
-💰 Месячная подписка: 100 USD
+🎯 Как начать:
+🆓 Пробный период: 3 дня + EA файл бесплатно
+📈 Тестируйте на демо или реальном счете
+💰 Месячная подписка: 100 USD (после тестирования)
+
+✅ Преимущества пробного периода:
+• Полный доступ к EA файлу
+• Тестирование всех функций
+• Оценка результатов без риска
 
 📞 Поддержка: @rasul_asqarov_rfx
 👥 Группа: t.me/RFx_Group"""
@@ -355,8 +369,13 @@ WELCOME_TEXT = """🤖 Добро пожаловать в RFX Trading!
 ⚡ VPS оптимизация
 
 💡 Варианты:
-🆓 Пробный период - 3 дня бесплатно
+🆓 Пробный период - 3 дня бесплатно + файл EA
 💰 Месячная подписка - 100 USD
+
+🎯 Логика работы:
+1. Берете пробную лицензию на 3 дня
+2. Скачиваете и тестируете EA
+3. Если понравится - покупаете подписку
 
 📞 Поддержка: @rasul_asqarov_rfx
 👥 Группа: t.me/RFx_Group"""
@@ -396,12 +415,31 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📁 EA файл: {ea_status}
 ⚡ Цена за месяц: {MONTHLY_PRICE} USD
-🆓 Пробный период: {TRIAL_DAYS} дня"""
+🆓 Пробный период: {TRIAL_DAYS} дня
+
+💡 Для загрузки EA файла отправьте .ex5 файл боту"""
         
         await update.message.reply_text(text)
         
     except Exception as e:
         logger.error(f"Ошибка в stats: {e}")
+
+async def upload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        if not is_admin(update.effective_user.id):
+            await update.message.reply_text("❌ Доступ запрещен!")
+            return
+        
+        await update.message.reply_text("""📁 Загрузка EA файла
+
+Отправьте .ex5 файл как обычное сообщение.
+Бот автоматически сохранит его в базу данных.
+
+✅ Поддерживаемые форматы: .ex5
+⚠️ Старый файл будет заменен новым""")
+        
+    except Exception as e:
+        logger.error(f"Ошибка в upload: {e}")
 
 # ===============================
 # ОБРАБОТЧИК КНОПОК
@@ -423,11 +461,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 🔑 Ваш ключ: `{key}`
 ⏰ Срок: {TRIAL_DAYS} дня
-📁 Теперь можете скачать EA
+📁 Можете СРАЗУ скачать и тестировать EA!
 
-После окончания пробного периода вы можете купить месячную подписку за 100 USD."""
+🎯 Как тестировать:
+1. Скачайте EA файл
+2. Установите на MT4/MT5  
+3. Тестируйте 3 дня
+4. Если понравится - купите подписку
+
+💰 После тестирования: месячная подписка 100 USD"""
                 
-                keyboard = [[InlineKeyboardButton("📁 Скачать EA", callback_data="download")]]
+                keyboard = [[InlineKeyboardButton("📁 Скачать EA для тестирования", callback_data="download")]]
                 await query.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
         
         elif data == "buy":
@@ -485,7 +529,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text = """❌ Лицензия не найдена
 
 Вы можете:
-🆓 Получить пробную лицензию на 3 дня
+🆓 Получить пробную лицензию на 3 дня + EA файл
 💰 Купить месячную подписку за 100 USD"""
                 await query.message.reply_text(text, reply_markup=main_keyboard())
             else:
@@ -507,12 +551,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if expires:
                     if status == "active":
                         text += f"\n⏰ Действует до: {format_datetime(expires)}"
+                        if license_type == "trial":
+                            text += f"\n🎯 Время для тестирования EA!"
                     else:
                         text += f"\n❌ Истекла: {format_datetime(expires)}"
+                        if license_type == "trial":
+                            text += f"\n💡 Понравился EA? Купите подписку!"
                 
                 keyboard = []
                 if status == "active":
-                    keyboard.append([InlineKeyboardButton("📁 Скачать EA", callback_data="download")])
+                    download_text = "📁 Скачать EA для тестирования" if license_type == "trial" else "📁 Скачать EA"
+                    keyboard.append([InlineKeyboardButton(download_text, callback_data="download")])
                 if license_type == "trial" or status == "expired":
                     keyboard.append([InlineKeyboardButton("💰 Купить подписку", callback_data="buy")])
                 
@@ -527,52 +576,116 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif data == "download":
             license_data = get_user_license(user_id)
             
-            if not license_data or license_data[2] != 'active':
-                await query.message.reply_text("❌ Нет активной лицензии!", reply_markup=main_keyboard())
+            # Проверяем есть ли лицензия вообще
+            if not license_data or not license_data[0]:
+                await query.message.reply_text("""❌ У вас нет лицензии!
+
+🆓 Получите пробную лицензию на 3 дня
+💰 Или купите месячную подписку""", reply_markup=main_keyboard())
                 return
             
+            key, license_type, status, expires, trial_used = license_data
+            
             # Проверяем не истекла ли лицензия
-            if license_data[3] and check_license_expired(license_data[3]):
-                await query.message.reply_text("❌ Лицензия истекла! Продлите подписку.", reply_markup=main_keyboard())
+            if expires and check_license_expired(expires):
+                if license_type == "trial":
+                    await query.message.reply_text("""❌ Пробный период истек!
+
+🎯 Понравился советник? 
+💰 Купите месячную подписку за 100 USD""", reply_markup=main_keyboard())
+                else:
+                    await query.message.reply_text("""❌ Подписка истекла!
+
+💰 Продлите подписку за 100 USD""", reply_markup=main_keyboard())
+                return
+            
+            # Проверяем активна ли лицензия
+            if status != 'active':
+                await query.message.reply_text("❌ Лицензия неактивна!", reply_markup=main_keyboard())
                 return
             
             key = license_data[0]
+            license_type = license_data[1]  # Добавляем эту строку
             
             await query.message.reply_text(f"""📁 Подготовка файла EA...
 
 🔑 Ваш ключ: `{key}`
-⏳ Отправляю файл...""", parse_mode='Markdown')
+⏳ Проверяю наличие файла...""", parse_mode='Markdown')
             
             # Получаем файл из базы данных
             filename, file_data = get_ea_file()
             
-            if filename and file_data:
+            if not filename or not file_data:
+                logger.error(f"Файл не найден для пользователя {user_id}")
+                await query.message.reply_text("""❌ EA файл не найден!
+
+🔧 Возможные причины:
+• Админ еще не загрузил файл
+• Файл поврежден
+
+📞 Обратитесь к @rasul_asqarov_rfx""", reply_markup=main_keyboard())
+                
+                # Уведомляем админа
                 try:
-                    # Создаем BytesIO объект из данных
-                    file_obj = BytesIO(file_data)
-                    file_obj.name = filename
-                    
-                    await query.message.reply_document(
-                        document=file_obj,
-                        filename=filename,
-                        caption=f"""🤖 Торговый советник загружен!
+                    await context.bot.send_message(
+                        chat_id=ADMIN_ID,
+                        text=f"⚠️ Пользователь {user_id} не может скачать EA файл!\nФайл не найден в базе данных.\nТип лицензии: {license_type}"
+                    )
+                except:
+                    pass
+                return
+            
+            try:
+                # Создаем BytesIO объект из данных
+                file_obj = BytesIO(file_data)
+                file_obj.name = filename
+                
+                # Разные подписи для разных типов лицензий
+                if license_type == "trial":
+                    caption_text = f"""🤖 EA для тестирования загружен!
+
+🔑 Пробный ключ: `{key}`
+📊 Стратегия: Богданова
+⏰ Срок тестирования: 3 дня
+
+🎯 Рекомендации для тестирования:
+• Установите на демо счет
+• Проверьте работу на BTCUSD, XAUUSD
+• Оцените результаты за 3 дня
+
+💰 Понравилось? Купите подписку за 100 USD!
+
+📞 Поддержка: @rasul_asqarov_rfx
+👥 Группа: t.me/RFx_Group"""
+                else:
+                    caption_text = f"""🤖 Торговый советник загружен!
 
 🔑 Лицензионный ключ: `{key}`
 📊 Стратегия: Богданова
 ⚡ Оптимизирован для VPS
 
 📞 Поддержка: @rasul_asqarov_rfx
-👥 Группа: t.me/RFx_Group""",
-                        parse_mode='Markdown'
-                    )
-                    
-                    logger.info(f"Файл успешно отправлен пользователю {user_id}")
-                    
-                except Exception as e:
-                    logger.error(f"Ошибка отправки файла: {e}")
-                    await query.message.reply_text("❌ Ошибка при отправке файла. Обратитесь к @rasul_asqarov_rfx")
-            else:
-                await query.message.reply_text("❌ Файл EA не найден. Обратитесь к @rasul_asqarov_rfx")
+👥 Группа: t.me/RFx_Group"""
+                
+                await query.message.reply_document(
+                    document=file_obj,
+                    filename=filename,
+                    caption=caption_text,
+                    parse_mode='Markdown'
+                )
+                
+                logger.info(f"Файл {filename} успешно отправлен пользователю {user_id} (тип: {license_type})")
+                
+            except Exception as e:
+                logger.error(f"Ошибка отправки файла пользователю {user_id}: {e}")
+                await query.message.reply_text("""❌ Ошибка при отправке файла!
+
+🔧 Попробуйте:
+• Обновить Telegram
+• Перезапустить приложение
+• Попробовать позже
+
+📞 Если проблема остается: @rasul_asqarov_rfx""", reply_markup=main_keyboard())
         
         elif data.startswith("approve_"):
             if not is_admin(user_id):
@@ -691,25 +804,45 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Доступ запрещен!")
             return
         
-        if not update.message.document.file_name.endswith('.ex5'):
+        document = update.message.document
+        
+        if not document.file_name.lower().endswith('.ex5'):
             await update.message.reply_text("❌ Можно загружать только файлы .ex5!")
+            return
+        
+        # Проверяем размер файла (максимум 20MB)
+        if document.file_size > 20 * 1024 * 1024:
+            await update.message.reply_text("❌ Файл слишком большой! Максимум 20MB.")
             return
         
         await update.message.reply_text("⏳ Загружаю файл...")
         
-        file = await update.message.document.get_file()
-        file_data = await file.download_as_bytearray()
-        
-        if save_ea_file(file_data, update.message.document.file_name):
-            await update.message.reply_text(f"""✅ EA файл успешно загружен и готов к раздаче!
+        try:
+            file = await document.get_file()
+            file_data = await file.download_as_bytearray()
+            
+            # Проверяем что данные получены
+            if not file_data:
+                await update.message.reply_text("❌ Не удалось скачать файл!")
+                return
+            
+            if save_ea_file(file_data, document.file_name):
+                await update.message.reply_text(f"""✅ EA файл успешно загружен и готов к раздаче!
 
-📁 Имя файла: {update.message.document.file_name}
+📁 Имя файла: {document.file_name}
 📊 Размер: {len(file_data):,} байт
 🔄 Старый файл заменен
 
-Теперь пользователи смогут скачивать обновленный файл.""")
-        else:
-            await update.message.reply_text("❌ Ошибка при загрузке файла!")
+🎯 Теперь пользователи смогут скачивать этот файл!
+Проверьте: /stats""")
+                
+                logger.info(f"Админ {update.effective_user.id} загрузил файл {document.file_name}")
+            else:
+                await update.message.reply_text("❌ Ошибка при сохранении файла в базу данных!")
+                
+        except Exception as e:
+            logger.error(f"Ошибка скачивания файла: {e}")
+            await update.message.reply_text("❌ Ошибка при скачивании файла с серверов Telegram!")
             
     except Exception as e:
         logger.error(f"Ошибка в document_handler: {e}")
@@ -742,6 +875,7 @@ def main():
     # Добавление обработчиков
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("upload", upload_command))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, document_handler))
@@ -759,6 +893,7 @@ def main():
     print("📋 ДОСТУПНЫЕ КОМАНДЫ:")
     print("/start - Главное меню")
     print("/stats - Статистика (только админ)")
+    print("/upload - Инструкция по загрузке EA (только админ)")
     print("=" * 50)
     print("📁 Для загрузки EA файла отправьте .ex5 файл боту от имени админа")
     print("⚡ Бот готов к работе!")
