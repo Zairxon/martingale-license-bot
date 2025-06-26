@@ -3,6 +3,23 @@ import sqlite3
 
 app = Flask(__name__)
 
+@app.route('/')
+def home():
+    return {
+        "service": "License Bot API",
+        "endpoints": [
+            "/health",
+            "/check_license/<key>/<account>"
+        ]
+    }
+
+@app.route('/health')
+def health_check():
+    return {
+        "status": "healthy", 
+        "timestamp": "2025-06-26T07:55:50+05:00",
+        "database": "connected"
+    }
 @app.route('/check_license')
 def check_license():
     key = request.args.get('key')
