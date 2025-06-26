@@ -37,10 +37,10 @@ PAYMENT_CARDS = {
         "number": "8600 0691 4864 4864",
         "owner": "Asqarov Rasulbek",
         "bank": "Kapitalbank",
-        "name": "💳 UzCard Kapitalbank"
+        "name": "💳 HUMO Kapitalbank"
     },
     "visa": {
-        "number": "4278 3100 XXXX XXXX",  # ⚠️ ЗАМЕНИТЕ на вашу реальную VISA карту!
+        "number": "4278 3100 2430 7167",  # 
         "owner": "Asqarov Rasulbek", 
         "bank": "Kapitalbank",
         "name": "💳 VISA Kapital"
