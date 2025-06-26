@@ -37,10 +37,10 @@ PAYMENT_CARDS = {
         "number": "8600 0691 4864 4864",
         "owner": "Asqarov Rasulbek",
         "bank": "Kapitalbank",
-        "name": "💳 HUMO Kapitalbank"
+        "name": "💳 UzCard Kapitalbank"
     },
     "visa": {
-        "number": "4278 3100 2430 7167",  # 
+        "number": "4278 3100 2430 7167",
         "owner": "Asqarov Rasulbek", 
         "bank": "Kapitalbank",
         "name": "💳 VISA Kapital"
@@ -406,14 +406,21 @@ async def show_payment_details(query, card_id, license_key):
         parse_mode=ParseMode.HTML,
         reply_markup=reply_markup
     )
+
+async def start_payment_verification(query):
     """ОРИГИНАЛЬНАЯ процедура подтверждения"""
     keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    # Показываем информацию об обеих картах
+    cards_info = ""
+    for card_id, card_info in PAYMENT_CARDS.items():
+        cards_info += f"• {card_info['name']}: {card_info['number']} ({card_info['owner']})\n"
+    
     await query.edit_message_text(
         "📸 <b>Подтверждение оплаты</b>\n\n"
-        f"Отправьте скриншот или фото чека об оплате ${MONTHLY_PRICE} USD\n"
-        f"на карту {PAYMENT_INFO['card_number']}\n\n"
+        f"Отправьте скриншот или фото чека об оплате ${MONTHLY_PRICE} USD\n\n"
+        f"💳 <b>Доступные карты для оплаты:</b>\n{cards_info}\n"
         "После проверки ваша лицензия будет активирована!",
         parse_mode=ParseMode.HTML,
         reply_markup=reply_markup
@@ -559,7 +566,8 @@ def main():
     
     logger.info("🤖 Запуск RFX Trading License Bot...")
     logger.info("💳 Оригинальные тарифы: 3 дня триал + $100/месяц")
-    logger.info(f"💳 Реквизиты: {PAYMENT_INFO['card_number']} ({PAYMENT_INFO['card_owner']})")
+    logger.info(f"💳 Реквизиты UzCard: {PAYMENT_CARDS['uzcard']['number']} ({PAYMENT_CARDS['uzcard']['owner']})")
+    logger.info(f"💳 Реквизиты VISA: {PAYMENT_CARDS['visa']['number']} ({PAYMENT_CARDS['visa']['owner']})")
     logger.info("✅ БД синхронизирована с API")
     logger.info("🔐 Бот готов к работе!")
     
