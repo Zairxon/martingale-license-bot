@@ -1,1 +1,1 @@
-web: gunicorn api:app
+web: python create_db.py && gunicorn api:app
