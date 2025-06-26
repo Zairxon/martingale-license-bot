@@ -20,11 +20,9 @@ def health_check():
         "timestamp": "2025-06-26T07:55:50+05:00",
         "database": "connected"
     }
-@app.route('/check_license')
-def check_license():
-    key = request.args.get('key')
-    account = request.args.get('account')
-    
+@app.route('/check_license/<key>/<account>')
+def check_license(key, account):
+        
     # Подключение к той же базе данных
     conn = sqlite3.connect('bot_secure.db')
     c = conn.cursor()
