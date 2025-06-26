@@ -1,1 +1,1 @@
-web: python main_FIXED.py
+web: python main.py
