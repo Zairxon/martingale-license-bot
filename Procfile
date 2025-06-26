@@ -1,1 +1,1 @@
-web: python create_db.py && gunicorn api:app
+web: ./start.sh
